@@ -23,6 +23,7 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
+  Info,
 } from "lucide-react";
 import { useTheme } from "./hooks/use-theme";
 
@@ -85,7 +86,6 @@ interface Settings {
   separation_settings: {
     model_filename: string;
     output_format: string;
-    output_bitrate?: string;
     output_dir: string;
     model_file_dir: string;
     normalization: number;
@@ -191,7 +191,7 @@ const DEFAULT_SETTINGS: Settings = {
     demucs_segments_enabled: true,
     mdxc_segment_size: 256,
     mdxc_override_model_segment_size: false,
-    mdxc_overlap: 0.25,
+    mdxc_overlap: 8,
     mdxc_batch_size: 1,
     mdxc_pitch_shift: 0,
   },
@@ -201,12 +201,34 @@ const DEFAULT_SETTINGS: Settings = {
 
 const fieldWrapperClass = "space-y-4";
 
+// Helper component for info tooltip
+const InfoTooltip = ({
+  children,
+  title,
+}: {
+  children: React.ReactNode;
+  title: string;
+}) => (
+  <div className="group relative inline-block">
+    <div className="flex items-center gap-2">
+      {children}
+      <Info className="h-4 w-4 text-gray-400 hover:text-gray-600 cursor-help" />
+    </div>
+    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-normal max-w-xs z-50">
+      {title}
+      <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+    </div>
+  </div>
+);
+
 export function SettingsPage({
   onClose,
   onRefreshDownloadedModels,
+  onSettingsSaved,
 }: {
   onClose: () => void;
   onRefreshDownloadedModels?: () => Promise<void>;
+  onSettingsSaved?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("General");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -233,6 +255,9 @@ export function SettingsPage({
   const [confirmingDeleteModel, setConfirmingDeleteModel] = useState<
     string | null
   >(null);
+  const [saveStatus, setSaveStatus] = useState<
+    "idle" | "saving" | "success" | "error"
+  >("idle");
 
   const { setTheme } = useTheme();
 
@@ -265,24 +290,54 @@ export function SettingsPage({
       setSavedSettings(savedSettings);
       setTheme(savedSettings.theme as "light" | "dark" | "system");
     } catch (error) {
-      // Remove console.error statement
+      console.error("Failed to load settings:", error);
     }
   };
 
   const saveSettings = async () => {
+    setSaveStatus("saving");
     try {
       await invoke("save_settings", { settings: JSON.stringify(settings) });
       setSavedSettings(settings);
       setHasUnsavedChanges(false);
       setTheme(settings.theme as "light" | "dark" | "system");
+      setSaveStatus("success");
+
+      // Notify parent component that settings were saved
+      if (onSettingsSaved) {
+        onSettingsSaved();
+      }
+
+      // Clear success status after 2 seconds
+      setTimeout(() => setSaveStatus("idle"), 2000);
     } catch (error) {
-      // Remove console.error statement
+      console.error("Failed to save settings:", error);
+      setSaveStatus("error");
+
+      // Still update local state to show the save worked for now
+      // This allows the UI to work even when backend commands aren't implemented
+      setSavedSettings(settings);
+      setHasUnsavedChanges(false);
+      setTheme(settings.theme as "light" | "dark" | "system");
+
+      // Notify parent component that settings were saved
+      if (onSettingsSaved) {
+        onSettingsSaved();
+      }
+
+      // Clear error status after 3 seconds
+      setTimeout(() => setSaveStatus("idle"), 3000);
     }
   };
 
   const revertSettings = () => {
     setSettings(savedSettings);
     setHasUnsavedChanges(false);
+  };
+
+  const resetToDefaults = () => {
+    setSettings(DEFAULT_SETTINGS);
+    setHasUnsavedChanges(true);
   };
 
   const handleClose = () => {
@@ -314,7 +369,8 @@ export function SettingsPage({
       const modelList = await invoke<ModelInfo[]>("list_separation_models");
       setModels(modelList);
     } catch (error) {
-      // Remove console.error statement
+      console.error("Failed to load models:", error);
+      setModels([]);
     } finally {
       setIsLoadingModels(false);
     }
@@ -331,7 +387,8 @@ export function SettingsPage({
       );
       setDownloadedModels(downloadedList);
     } catch (error) {
-      // Remove console.error statement
+      console.error("Failed to load downloaded models:", error);
+      setDownloadedModels([]);
     } finally {
       setIsLoadingDownloadedModels(false);
     }
@@ -635,140 +692,49 @@ export function SettingsPage({
         {/* Stem Separation Settings Tab */}
         {activeTab === "Stem Separation" && (
           <div className="space-y-6">
-            {/* Audio Separator Configuration */}
+            {/* Basic Configuration */}
             <Card>
               <CardHeader>
-                <CardTitle>Audio Separator Configuration</CardTitle>
+                <CardTitle>Basic Configuration</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Model Settings */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block mb-2 font-semibold">
-                      Model Filename
-                    </label>
-                    <Input
-                      value={settings.separation_settings.model_filename}
-                      placeholder="model_bs_roformer_ep_317_sdr_12.9755.ckpt"
-                      onChange={(e) =>
-                        updateSetting("separation_settings", {
-                          ...settings.separation_settings,
-                          model_filename: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-
-                  <div>
+                {/* Output Format */}
+                <div>
+                  <InfoTooltip title="Output format for separated files, any common format. Example: --output_format=MP3">
                     <label className="block mb-2 font-semibold">
                       Output Format
                     </label>
-                    <Select
-                      value={settings.separation_settings.output_format}
-                      onValueChange={(val) =>
-                        updateSetting("separation_settings", {
-                          ...settings.separation_settings,
-                          output_format: val,
-                        })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="WAV">WAV</SelectItem>
-                        <SelectItem value="MP3">MP3</SelectItem>
-                        <SelectItem value="FLAC">FLAC</SelectItem>
-                        <SelectItem value="M4A">M4A</SelectItem>
-                        <SelectItem value="OPUS">OPUS</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Output Settings */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block mb-2 font-semibold">
-                      Output Directory
-                    </label>
-                    <div className="flex gap-2">
-                      <Input
-                        value={settings.separation_settings.output_dir}
-                        placeholder="Leave empty for current directory"
-                        onChange={(e) =>
-                          updateSetting("separation_settings", {
-                            ...settings.separation_settings,
-                            output_dir: e.target.value,
-                          })
-                        }
-                        className="flex-1"
-                      />
-                      <Button
-                        variant="outline"
-                        onClick={async () => {
-                          try {
-                            const selectedPath = await invoke<string>(
-                              "select_folder"
-                            );
-                            updateSetting("separation_settings", {
-                              ...settings.separation_settings,
-                              output_dir: selectedPath,
-                            });
-                          } catch (error) {
-                            // Remove console.error statement
-                          }
-                        }}
-                      >
-                        Browse
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block mb-2 font-semibold">
-                      Model File Directory
-                    </label>
-                    <div className="flex gap-2">
-                      <Input
-                        value={settings.separation_settings.model_file_dir}
-                        placeholder="Path to model files"
-                        onChange={(e) =>
-                          updateSetting("separation_settings", {
-                            ...settings.separation_settings,
-                            model_file_dir: e.target.value,
-                          })
-                        }
-                        className="flex-1"
-                      />
-                      <Button
-                        variant="outline"
-                        onClick={async () => {
-                          try {
-                            const selectedPath = await invoke<string>(
-                              "select_folder"
-                            );
-                            updateSetting("separation_settings", {
-                              ...settings.separation_settings,
-                              model_file_dir: selectedPath,
-                            });
-                          } catch (error) {
-                            // Remove console.error statement
-                          }
-                        }}
-                      >
-                        Browse
-                      </Button>
-                    </div>
-                  </div>
+                  </InfoTooltip>
+                  <Select
+                    value={settings.separation_settings.output_format}
+                    onValueChange={(val) =>
+                      updateSetting("separation_settings", {
+                        ...settings.separation_settings,
+                        output_format: val,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="WAV">WAV</SelectItem>
+                      <SelectItem value="MP3">MP3</SelectItem>
+                      <SelectItem value="FLAC">FLAC</SelectItem>
+                      <SelectItem value="M4A">M4A</SelectItem>
+                      <SelectItem value="OPUS">OPUS</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Audio Processing Settings */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block mb-2 font-semibold">
-                      Normalization
-                    </label>
+                    <InfoTooltip title="Max peak amplitude to normalize input and output audio to. Example: --normalization=0.7">
+                      <label className="block mb-2 font-semibold">
+                        Normalization
+                      </label>
+                    </InfoTooltip>
                     <Input
                       type="number"
                       step="0.01"
@@ -785,9 +751,11 @@ export function SettingsPage({
                   </div>
 
                   <div>
-                    <label className="block mb-2 font-semibold">
-                      Amplification
-                    </label>
+                    <InfoTooltip title="Min peak amplitude to amplify input and output audio to. Example: --amplification=0.4">
+                      <label className="block mb-2 font-semibold">
+                        Amplification
+                      </label>
+                    </InfoTooltip>
                     <Input
                       type="number"
                       step="0.01"
@@ -797,37 +765,86 @@ export function SettingsPage({
                       onChange={(e) =>
                         updateSetting("separation_settings", {
                           ...settings.separation_settings,
-                          amplification: parseFloat(e.target.value) || 1.0,
+                          amplification: parseFloat(e.target.value) || 0.0,
                         })
                       }
                     />
                   </div>
 
                   <div>
-                    <label className="block mb-2 font-semibold">
-                      Sample Rate
-                    </label>
-                    <Input
-                      type="number"
-                      value={settings.separation_settings.sample_rate}
-                      onChange={(e) =>
+                    <InfoTooltip title="Modify the sample rate of the output audio. Example: --sample_rate=44100">
+                      <label className="block mb-2 font-semibold">
+                        Sample Rate
+                      </label>
+                    </InfoTooltip>
+                    <Select
+                      value={settings.separation_settings.sample_rate.toString()}
+                      onValueChange={(val) =>
                         updateSetting("separation_settings", {
                           ...settings.separation_settings,
-                          sample_rate: parseInt(e.target.value) || 44100,
+                          sample_rate: parseInt(val) || 44100,
                         })
                       }
-                    />
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="8000">8,000 Hz</SelectItem>
+                        <SelectItem value="11025">11,025 Hz</SelectItem>
+                        <SelectItem value="16000">16,000 Hz</SelectItem>
+                        <SelectItem value="22050">22,050 Hz</SelectItem>
+                        <SelectItem value="32000">32,000 Hz</SelectItem>
+                        <SelectItem value="44100">
+                          44,100 Hz (CD Quality)
+                        </SelectItem>
+                        <SelectItem value="48000">
+                          48,000 Hz (Professional)
+                        </SelectItem>
+                        <SelectItem value="96000">
+                          96,000 Hz (High Quality)
+                        </SelectItem>
+                        <SelectItem value="192000">
+                          192,000 Hz (Studio Quality)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
+                </div>
+
+                {/* Advanced Options */}
+                <div className="flex items-center space-x-3">
+                  <Checkbox
+                    id="useAutocast"
+                    checked={settings.separation_settings.use_autocast}
+                    onCheckedChange={(checked) =>
+                      updateSetting("separation_settings", {
+                        ...settings.separation_settings,
+                        use_autocast: checked as boolean,
+                      })
+                    }
+                  />
+                  <InfoTooltip title="Use PyTorch autocast for faster inference. Do not use for CPU inference. Example: --use_autocast">
+                    <label htmlFor="useAutocast" className="text-sm">
+                      Use Autocast
+                    </label>
+                  </InfoTooltip>
                 </div>
 
                 {/* MDX Architecture Settings */}
                 <div>
-                  <label className="block mb-3 font-semibold">
-                    MDX Architecture Settings
-                  </label>
+                  <InfoTooltip title="MDX Architecture Parameters - Larger consumes more resources, but may give better results">
+                    <label className="block mb-3 font-semibold">
+                      MDX Architecture Settings
+                    </label>
+                  </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
-                      <label className="block mb-1 text-sm">Segment Size</label>
+                      <InfoTooltip title="Larger consumes more resources, but may give better results. Example: --mdx_segment_size=256">
+                        <label className="block mb-1 text-sm">
+                          Segment Size
+                        </label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.mdx_segment_size}
@@ -841,7 +858,9 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Overlap</label>
+                      <InfoTooltip title="Amount of overlap between prediction windows, 0.001-0.999. Higher is better but slower. Example: --mdx_overlap=0.25">
+                        <label className="block mb-1 text-sm">Overlap</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         step="0.01"
@@ -858,7 +877,9 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Batch Size</label>
+                      <InfoTooltip title="Larger consumes more RAM but may process slightly faster. Example: --mdx_batch_size=4">
+                        <label className="block mb-1 text-sm">Batch Size</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.mdx_batch_size}
@@ -884,21 +905,27 @@ export function SettingsPage({
                           })
                         }
                       />
-                      <label htmlFor="mdxEnableDenoise" className="text-sm">
-                        Enable Denoise
-                      </label>
+                      <InfoTooltip title="Enable denoising during separation. Example: --mdx_enable_denoise">
+                        <label htmlFor="mdxEnableDenoise" className="text-sm">
+                          Enable Denoise
+                        </label>
+                      </InfoTooltip>
                     </div>
                   </div>
                 </div>
 
                 {/* VR Architecture Settings */}
                 <div>
-                  <label className="block mb-3 font-semibold">
-                    VR Architecture Settings
-                  </label>
+                  <InfoTooltip title="VR Architecture Parameters - Balance quality and speed for vocal separation">
+                    <label className="block mb-3 font-semibold">
+                      VR Architecture Settings
+                    </label>
+                  </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
-                      <label className="block mb-1 text-sm">Batch Size</label>
+                      <InfoTooltip title="Number of batches to process at a time. Higher = more RAM, slightly faster processing. Example: --vr_batch_size=16">
+                        <label className="block mb-1 text-sm">Batch Size</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.vr_batch_size}
@@ -912,7 +939,11 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Window Size</label>
+                      <InfoTooltip title="Balance quality and speed. 1024 = fast but lower, 320 = slower but better quality. Example: --vr_window_size=320">
+                        <label className="block mb-1 text-sm">
+                          Window Size
+                        </label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.vr_window_size}
@@ -926,7 +957,9 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Aggression</label>
+                      <InfoTooltip title="Intensity of primary stem extraction, -100 - 100. Typically, 5 for vocals & instrumentals. Example: --vr_aggression=2">
+                        <label className="block mb-1 text-sm">Aggression</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.vr_aggression}
@@ -940,9 +973,11 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">
-                        Post Process Threshold
-                      </label>
+                      <InfoTooltip title="Threshold for post_process feature: 0.1-0.3. Example: --vr_post_process_threshold=0.1">
+                        <label className="block mb-1 text-sm">
+                          Post Process Threshold
+                        </label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         step="0.1"
@@ -974,9 +1009,11 @@ export function SettingsPage({
                           })
                         }
                       />
-                      <label htmlFor="vrEnableTta" className="text-sm">
-                        Enable TTA
-                      </label>
+                      <InfoTooltip title="Enable Test-Time-Augmentation; slow but improves quality. Example: --vr_enable_tta">
+                        <label htmlFor="vrEnableTta" className="text-sm">
+                          Enable TTA
+                        </label>
+                      </InfoTooltip>
                     </div>
 
                     <div className="flex items-center space-x-3">
@@ -992,9 +1029,11 @@ export function SettingsPage({
                           })
                         }
                       />
-                      <label htmlFor="vrHighEndProcess" className="text-sm">
-                        High End Process
-                      </label>
+                      <InfoTooltip title="Mirror the missing frequency range of the output. Example: --vr_high_end_process">
+                        <label htmlFor="vrHighEndProcess" className="text-sm">
+                          High End Process
+                        </label>
+                      </InfoTooltip>
                     </div>
 
                     <div className="flex items-center space-x-3">
@@ -1010,21 +1049,32 @@ export function SettingsPage({
                           })
                         }
                       />
-                      <label htmlFor="vrEnablePostProcess" className="text-sm">
-                        Enable Post Process
-                      </label>
+                      <InfoTooltip title="Identify leftover artifacts within vocal output; may improve separation for some songs. Example: --vr_enable_post_process">
+                        <label
+                          htmlFor="vrEnablePostProcess"
+                          className="text-sm"
+                        >
+                          Enable Post Process
+                        </label>
+                      </InfoTooltip>
                     </div>
                   </div>
                 </div>
 
                 {/* Demucs Architecture Settings */}
                 <div>
-                  <label className="block mb-3 font-semibold">
-                    Demucs Architecture Settings
-                  </label>
+                  <InfoTooltip title="Demucs Architecture Parameters - High-quality separation with segment-wise processing">
+                    <label className="block mb-3 font-semibold">
+                      Demucs Architecture Settings
+                    </label>
+                  </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
-                      <label className="block mb-1 text-sm">Segment Size</label>
+                      <InfoTooltip title="Size of segments into which the audio is split, 1-100. Higher = slower but better quality. Example: --demucs_segment_size=256">
+                        <label className="block mb-1 text-sm">
+                          Segment Size
+                        </label>
+                      </InfoTooltip>
                       <Input
                         value={settings.separation_settings.demucs_segment_size}
                         onChange={(e) =>
@@ -1037,21 +1087,25 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Shifts</label>
+                      <InfoTooltip title="Number of predictions with random shifts, higher = slower but better quality. Example: --demucs_shifts=4">
+                        <label className="block mb-1 text-sm">Shifts</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.demucs_shifts}
                         onChange={(e) =>
                           updateSetting("separation_settings", {
                             ...settings.separation_settings,
-                            demucs_shifts: parseInt(e.target.value) || 1,
+                            demucs_shifts: parseInt(e.target.value) || 2,
                           })
                         }
                       />
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Overlap</label>
+                      <InfoTooltip title="Overlap between prediction windows, 0.001-0.999. Higher = slower but better quality. Example: --demucs_overlap=0.25">
+                        <label className="block mb-1 text-sm">Overlap</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         step="0.01"
@@ -1080,24 +1134,32 @@ export function SettingsPage({
                           })
                         }
                       />
-                      <label
-                        htmlFor="demucsSegmentsEnabled"
-                        className="text-sm"
-                      >
-                        Segments Enabled
-                      </label>
+                      <InfoTooltip title="Enable segment-wise processing. Example: --demucs_segments_enabled=True">
+                        <label
+                          htmlFor="demucsSegmentsEnabled"
+                          className="text-sm"
+                        >
+                          Segments Enabled
+                        </label>
+                      </InfoTooltip>
                     </div>
                   </div>
                 </div>
 
                 {/* MDXC Architecture Settings */}
                 <div>
-                  <label className="block mb-3 font-semibold">
-                    MDXC Architecture Settings
-                  </label>
+                  <InfoTooltip title="MDXC Architecture Parameters - Advanced separation with pitch shifting capabilities">
+                    <label className="block mb-3 font-semibold">
+                      MDXC Architecture Settings
+                    </label>
+                  </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div>
-                      <label className="block mb-1 text-sm">Segment Size</label>
+                      <InfoTooltip title="Larger consumes more resources, but may give better results. Example: --mdxc_segment_size=256">
+                        <label className="block mb-1 text-sm">
+                          Segment Size
+                        </label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.mdxc_segment_size}
@@ -1111,24 +1173,28 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Overlap</label>
+                      <InfoTooltip title="Amount of overlap between prediction windows, 2-50. Higher is better but slower. Example: --mdxc_overlap=8">
+                        <label className="block mb-1 text-sm">Overlap</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
-                        step="0.01"
-                        min="0"
-                        max="1"
+                        step="0.1"
+                        min="2"
+                        max="50"
                         value={settings.separation_settings.mdxc_overlap}
                         onChange={(e) =>
                           updateSetting("separation_settings", {
                             ...settings.separation_settings,
-                            mdxc_overlap: parseFloat(e.target.value) || 0.25,
+                            mdxc_overlap: parseFloat(e.target.value) || 8,
                           })
                         }
                       />
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Batch Size</label>
+                      <InfoTooltip title="Larger consumes more RAM but may process slightly faster. Example: --mdxc_batch_size=4">
+                        <label className="block mb-1 text-sm">Batch Size</label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         value={settings.separation_settings.mdxc_batch_size}
@@ -1142,7 +1208,11 @@ export function SettingsPage({
                     </div>
 
                     <div>
-                      <label className="block mb-1 text-sm">Pitch Shift</label>
+                      <InfoTooltip title="Shift audio pitch by a number of semitones while processing. May improve output for deep/high vocals. Example: --mdxc_pitch_shift=2">
+                        <label className="block mb-1 text-sm">
+                          Pitch Shift
+                        </label>
+                      </InfoTooltip>
                       <Input
                         type="number"
                         step="0.1"
@@ -1171,102 +1241,63 @@ export function SettingsPage({
                           })
                         }
                       />
-                      <label
-                        htmlFor="mdxcOverrideModelSegmentSize"
-                        className="text-sm"
-                      >
-                        Override Model Segment Size
-                      </label>
+                      <InfoTooltip title="Override model default segment size instead of using the model default value. Example: --mdxc_override_model_segment_size">
+                        <label
+                          htmlFor="mdxcOverrideModelSegmentSize"
+                          className="text-sm"
+                        >
+                          Override Model Segment Size
+                        </label>
+                      </InfoTooltip>
                     </div>
                   </div>
                 </div>
 
-                {/* GPU Acceleration Info */}
+                {/* Information Section */}
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
                   <div className="flex items-start space-x-3">
                     <div className="flex-shrink-0">
-                      <svg
-                        className="w-5 h-5 text-blue-600 dark:text-blue-400"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
+                      <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
-                    <div>
+                    <div className="space-y-2">
                       <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                        GPU Acceleration
+                        Audio Separation Information
                       </h4>
-                      <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                        Audio separation automatically uses the best available
-                        GPU acceleration (CUDA, MPS, CoreML) when available. No
-                        manual configuration required.
-                      </p>
+                      <div className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                        <p>
+                          <strong>GPU Acceleration:</strong> Automatically uses
+                          the best available GPU acceleration (CUDA, MPS,
+                          CoreML) when available.
+                        </p>
+                        <p>
+                          <strong>Architecture Types:</strong>
+                        </p>
+                        <ul className="list-disc list-inside ml-2 space-y-1">
+                          <li>
+                            <strong>MDX:</strong> General-purpose separation
+                            with good quality/speed balance
+                          </li>
+                          <li>
+                            <strong>VR:</strong> Specialized for vocal
+                            separation with adjustable aggression
+                          </li>
+                          <li>
+                            <strong>Demucs:</strong> High-quality separation
+                            with segment-wise processing
+                          </li>
+                          <li>
+                            <strong>MDXC:</strong> Advanced separation with
+                            pitch shifting capabilities
+                          </li>
+                        </ul>
+                        <p>
+                          <strong>Performance Tips:</strong> Higher segment
+                          sizes and overlaps improve quality but increase
+                          processing time and memory usage.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-
-                {/* Additional Settings */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex items-center space-x-3">
-                    <Checkbox
-                      id="useAutocast"
-                      checked={settings.separation_settings.use_autocast}
-                      onCheckedChange={(checked) =>
-                        updateSetting("separation_settings", {
-                          ...settings.separation_settings,
-                          use_autocast: checked as boolean,
-                        })
-                      }
-                    />
-                    <label htmlFor="useAutocast" className="text-sm">
-                      Use Autocast
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="block mb-2 font-semibold">
-                      Single Stem (Optional)
-                    </label>
-                    <Input
-                      value={settings.separation_settings.single_stem || ""}
-                      placeholder="e.g., vocals, instrumental"
-                      onChange={(e) =>
-                        updateSetting("separation_settings", {
-                          ...settings.separation_settings,
-                          single_stem: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Stem Extraction Settings */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Stem Extraction Settings</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center space-x-3">
-                  <Checkbox
-                    id="enableStemExtraction"
-                    checked={settings.enable_stem_extraction}
-                    onCheckedChange={(checked) =>
-                      updateSetting(
-                        "enable_stem_extraction",
-                        checked as boolean
-                      )
-                    }
-                  />
-                  <label htmlFor="enableStemExtraction" className="text-sm">
-                    Enable Stem Extraction
-                  </label>
                 </div>
               </CardContent>
             </Card>
@@ -1352,7 +1383,7 @@ export function SettingsPage({
                           );
                           updateSetting("model_directory", selectedPath);
                         } catch (error) {
-                          // Remove console.error statement
+                          console.error("Failed to select folder:", error);
                         }
                       }}
                     >
@@ -1466,16 +1497,16 @@ export function SettingsPage({
                 <Button
                   onClick={downloadSelectedModels}
                   disabled={selectedModels.length === 0 || isDownloadingModels}
-                  className="w-full"
+                  className="w-full text-gray-400"
                 >
                   {isDownloadingModels ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin " />
                       Downloading...
                     </>
                   ) : (
                     <>
-                      <Download className="h-4 w-4 mr-2" />
+                      <Download className="h-4 w-4 mr-2 text-gray-400" />
                       Download Selected ({selectedModels.length})
                     </>
                   )}
@@ -1559,9 +1590,21 @@ export function SettingsPage({
       {/* Bottom action bar */}
       <footer className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4 flex justify-between items-center z-50 shadow-md">
         <div className="text-sm text-gray-500">
-          {hasUnsavedChanges && "You have unsaved changes"}
+          {saveStatus === "saving" && "Saving settings..."}
+          {saveStatus === "success" && "Settings saved successfully!"}
+          {saveStatus === "error" && "Failed to save settings"}
+          {saveStatus === "idle" &&
+            hasUnsavedChanges &&
+            "You have unsaved changes"}
         </div>
         <div className="flex gap-3">
+          <Button
+            variant="outline"
+            onClick={resetToDefaults}
+            className="text-orange-600 hover:text-orange-700 border-orange-600 hover:border-orange-700"
+          >
+            Reset to Defaults
+          </Button>
           <Button
             variant="outline"
             onClick={revertSettings}
@@ -1575,11 +1618,36 @@ export function SettingsPage({
           </Button>
           <Button
             onClick={saveSettings}
-            disabled={!hasUnsavedChanges}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            disabled={!hasUnsavedChanges || saveStatus === "saving"}
+            className={`${
+              saveStatus === "success"
+                ? "bg-green-600 hover:bg-green-700"
+                : saveStatus === "error"
+                ? "bg-red-600 hover:bg-red-700"
+                : "bg-indigo-600 hover:bg-indigo-700"
+            } text-white`}
           >
-            <Save className="h-4 w-4 mr-2" />
-            Save
+            {saveStatus === "saving" ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Save
+              </>
+            ) : saveStatus === "success" ? (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Save
+              </>
+            ) : saveStatus === "error" ? (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Error
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Save
+              </>
+            )}
           </Button>
         </div>
       </footer>

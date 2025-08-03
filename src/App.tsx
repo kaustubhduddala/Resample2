@@ -81,7 +81,6 @@ interface SeparationResult {
 interface SeparationSettings {
   model_filename: string;
   output_format: string;
-  output_bitrate?: string;
   output_dir: string;
   model_file_dir: string;
   normalization: number;
@@ -185,8 +184,6 @@ function App() {
   ]);
   const [audioFileHistory, setAudioFileHistory] = useState<AudioFileInfo[]>([]);
 
-  const [inputEnabled, setInputEnabled] = useState(true);
-
   // Function to refresh audio file history
   const refreshAudioFileHistory = async () => {
     try {
@@ -272,7 +269,7 @@ function App() {
       demucs_segments_enabled: true,
       mdxc_segment_size: 256,
       mdxc_override_model_segment_size: false,
-      mdxc_overlap: 0.25,
+      mdxc_overlap: 8,
       mdxc_batch_size: 1,
       mdxc_pitch_shift: 0,
     },
@@ -283,7 +280,6 @@ function App() {
   const [separationSettings] = useState<SeparationSettings>({
     model_filename: "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
     output_format: "WAV",
-    output_bitrate: undefined,
     output_dir: "",
     model_file_dir: "/tmp/audio-separator-models/",
     normalization: 0.9,
@@ -310,7 +306,7 @@ function App() {
     demucs_segments_enabled: true,
     mdxc_segment_size: 256,
     mdxc_override_model_segment_size: false,
-    mdxc_overlap: 0.25,
+    mdxc_overlap: 8,
     mdxc_batch_size: 1,
     mdxc_pitch_shift: 0,
   });
@@ -933,6 +929,18 @@ function App() {
 
         // Refresh audio file history when returning from settings
         refreshAudioFileHistory();
+
+        // Reload settings when returning from settings page
+        const reloadSettings = async () => {
+          try {
+            const settingsJson = await invoke<string>("load_settings");
+            const loadedSettings = JSON.parse(settingsJson);
+            setSettings(loadedSettings);
+          } catch (error) {
+            console.error("Failed to reload settings:", error);
+          }
+        };
+        reloadSettings();
       }, 0);
     }
   }, [showSettings]);
@@ -965,7 +973,24 @@ function App() {
 
   // Conditional rendering without early return
   if (showSettings) {
-    return <SettingsPage onClose={() => setShowSettings(false)} />;
+    return (
+      <SettingsPage
+        onClose={() => setShowSettings(false)}
+        onSettingsSaved={() => {
+          // Reload settings when they are saved
+          const reloadSettings = async () => {
+            try {
+              const settingsJson = await invoke<string>("load_settings");
+              const loadedSettings = JSON.parse(settingsJson);
+              setSettings(loadedSettings);
+            } catch (error) {
+              console.error("Failed to reload settings after save:", error);
+            }
+          };
+          reloadSettings();
+        }}
+      />
+    );
   }
 
   // TODO: Implement database reload button and uncomment this function
@@ -1604,7 +1629,7 @@ function App() {
                         </a>
                       </div>
                       <div className="font-bold mt-1">PARANØID</div>
-                      <div className="mt-1">0.2.1.2</div>
+                      <div className="mt-1">0.0.1-alpha.1</div>
                     </div>
                   </div>
                 </div>

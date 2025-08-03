@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "resample",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha.1",
   "identifier": "com.resample.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -38,6 +38,13 @@
       "icons/icon.png",
       "icons/icon2.png"
     ],
-    "resources": [  "src-python/"]
+    "resources": {
+      "src-python/": "src-python/",
+      "resources/ffmpeg/ffmpeg": "resources/ffmpeg/ffmpeg",
+      "resources/ffmpeg/ffprobe": "resources/ffmpeg/ffprobe",
+      "resources/ffmpeg/ffmpeg.exe": "resources/ffmpeg/ffmpeg.exe",
+      "resources/ffmpeg/ffprobe.exe": "resources/ffmpeg/ffprobe.exe",
+      "resources/main.py": "resources/main.py"
+    }
   }
-}
+} 
