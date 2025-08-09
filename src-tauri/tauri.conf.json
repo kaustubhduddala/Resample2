@@ -14,7 +14,7 @@
       {
         "title": "Resample",
         "width": 1150,
-        "height": 990,
+        "height": 1005,
         "resizable": false,
         "fullscreen": false,
         "maximizable": false,
@@ -39,12 +39,10 @@
       "icons/icon2.png"
     ],
     "resources": {
-      "src-python/": "src-python/",
       "resources/ffmpeg/ffmpeg": "resources/ffmpeg/ffmpeg",
       "resources/ffmpeg/ffprobe": "resources/ffmpeg/ffprobe",
       "resources/ffmpeg/ffmpeg.exe": "resources/ffmpeg/ffmpeg.exe",
-      "resources/ffmpeg/ffprobe.exe": "resources/ffmpeg/ffprobe.exe",
-      "resources/main.py": "resources/main.py"
+      "resources/ffmpeg/ffprobe.exe": "resources/ffmpeg/ffprobe.exe"
     }
   }
 } 

@@ -56,9 +56,6 @@ importers:
       tailwindcss-animate:
         specifier: ^1.0.7
         version: 1.0.7(tailwindcss@3.4.17)
-      tauri-plugin-python-api:
-        specifier: ^0.3.4
-        version: 0.3.4
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2
@@ -1816,9 +1813,6 @@ packages:
     resolution: {integrity: sha512-w33E2aCvSDP0tW9RZuNXadXlkHXqFzSkQew/aIa2i/Sj8fThxwovwlXHSPXTbAHwEIhBFXAedUhP2tueAKP8Og==}
     engines: {node: '>=14.0.0'}
     hasBin: true
-
-  tauri-plugin-python-api@0.3.4:
-    resolution: {integrity: sha512-WRawN6X1H/ALAvbZlKgjUiyjrMTYYlZXEo6ngEcGPaKjTBR5cqBVZXCC2KT4OL90Z6+g2oEw6mqBpQPw5fwOKw==}
 
   thenify-all@1.6.0:
     resolution: {integrity: sha512-RNxQH/qI8/t3thXJDwcstUO4zeqo64+Uy/+sNVRBx4Xn2OX+OZ9oP+iJnNFqplFra2ZUVeKCSa2oVWi3T4uVmA==}
@@ -3676,10 +3670,6 @@ snapshots:
       sucrase: 3.35.0
     transitivePeerDependencies:
       - ts-node
-
-  tauri-plugin-python-api@0.3.4:
-    dependencies:
-      '@tauri-apps/api': 2.7.0
 
   thenify-all@1.6.0:
     dependencies:

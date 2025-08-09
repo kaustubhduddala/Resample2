@@ -28,7 +28,7 @@ import {
   Settings,
   Trash2,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SettingsPage } from "./Settings";
 
@@ -196,6 +196,7 @@ function App() {
 
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
+  const [mediaDuration, setMediaDuration] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [deletingFileIds, setDeletingFileIds] = useState<Set<string>>(
     new Set()
@@ -203,6 +204,7 @@ function App() {
   const deleteTimeoutsRef = useRef<Map<string, number>>(new Map());
   const consoleRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Remove the Download Center state variables since it's now in Settings
   const [settings, setSettings] = useState<Settings>({
@@ -558,14 +560,37 @@ function App() {
       const result = await invoke<VideoInfo>("fetch_video_info", {
         url: videoUrl,
       });
-      setVideoInfo(result);
+
+      // Update video info with additional metadata
+      const enhancedVideoInfo: VideoInfo = {
+        ...result,
+        title: result.title || "Unknown Title",
+        duration: result.duration ? Math.floor(result.duration) : undefined,
+        uploader: result.uploader || "Unknown Uploader",
+      };
+
+      setVideoInfo(enhancedVideoInfo);
       setConsoleMessages((prev) => [
         ...prev,
-        `Successfully loaded: ${result.title}`,
+        `Successfully loaded: ${enhancedVideoInfo.title}`,
       ]);
+
+      // Update timeline if duration is available
+      if (enhancedVideoInfo.duration) {
+        setCurrentTime([0]);
+        setEndTime([enhancedVideoInfo.duration]);
+      }
     } catch (error) {
       const errorMessage = error as string;
-      setVideoInfo({ title: "Error", error: errorMessage });
+      setVideoInfo({
+        title: "Error",
+        error: errorMessage,
+        duration: undefined,
+        thumbnail: undefined,
+        uploader: undefined,
+        view_count: undefined,
+        video_url: undefined,
+      });
       setConsoleMessages((prev) => [...prev, `Error: ${errorMessage}`]);
     } finally {
       setIsLoadingVideo(false);
@@ -595,16 +620,17 @@ function App() {
     ]);
 
     try {
-      const startTime = currentTime[0];
-      const endTimeValue = endTime[0];
+      const selectionStart = Math.floor(currentTime[0] ?? 0);
+      const selectionEnd = Math.floor(endTime[0] ?? 0);
+      const hasSelection = selectionEnd > selectionStart;
 
       // Use unified download for all input types
       const result = await invoke<DownloadResult>("unified_download", {
         input: url,
         inputType: inputType,
         processingMode: processingMode,
-        startTime: startTime !== 0 ? startTime : null,
-        endTime: endTimeValue !== 0 ? endTimeValue : null,
+        startTime: hasSelection ? selectionStart : null,
+        endTime: hasSelection ? selectionEnd : null,
       });
 
       // Only update progress to 100 if the download was successful
@@ -888,12 +914,12 @@ function App() {
 
   // Update timeline when video info changes
   useEffect(() => {
-    if (videoInfo?.duration) {
-      const duration = Math.floor(videoInfo.duration);
+    if (typeof mediaDuration === "number" && mediaDuration > 0) {
+      const duration = Math.floor(mediaDuration);
       setCurrentTime([0]);
       setEndTime([duration]);
     }
-  }, [videoInfo]);
+  }, [mediaDuration]);
 
   // Auto-scroll console to bottom when new messages are added
   useEffect(() => {
@@ -1175,12 +1201,13 @@ function App() {
                         <div className="text-center">
                           <Loader2 className="h-8 w-8 mx-auto mb-1 text-slate-400 dark:text-slate-500 animate-spin" />
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Loading...
+                            Loading preview...
                           </p>
                         </div>
                       ) : videoInfo?.thumbnail ||
                         inputType === "LocalFile" ||
-                        inputType === "Spotify" ? (
+                        inputType === "Spotify" ||
+                        videoInfo?.title ? (
                         <div className="w-full h-full relative">
                           {inputType === "LocalFile" ? (
                             // Audio player for local files
@@ -1192,33 +1219,40 @@ function App() {
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {videoInfo?.uploader || "Local File"}
                                 </p>
+                                {mediaDuration && (
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Duration:{" "}
+                                    {formatTimeToHHMMSS(mediaDuration)}
+                                  </p>
+                                )}
                               </div>
                               <audio
-                                ref={videoRef as any}
+                                ref={audioRef}
                                 className="w-full max-w-sm"
                                 onTimeUpdate={() => {
-                                  if (videoRef.current) {
+                                  if (audioRef.current) {
                                     setCurrentTime([
-                                      Math.floor(
-                                        (videoRef.current as HTMLAudioElement)
-                                          .currentTime
-                                      ),
+                                      Math.floor(audioRef.current.currentTime),
                                     ]);
                                   }
                                 }}
                                 onLoadedMetadata={() => {
-                                  if (videoRef.current) {
-                                    const audio =
-                                      videoRef.current as HTMLAudioElement;
+                                  if (audioRef.current) {
+                                    const audio = audioRef.current;
                                     setCurrentTime([0]);
                                     setEndTime([
                                       Math.floor(audio.duration || 300),
                                     ]);
+                                    setMediaDuration(
+                                      Number.isFinite(audio.duration)
+                                        ? Math.floor(audio.duration)
+                                        : mediaDuration
+                                    );
                                   }
                                 }}
                                 controls
                                 preload="metadata"
-                                src={url}
+                                src={url ? convertFileSrc(url) : undefined}
                               >
                                 Your browser does not support the audio element.
                               </audio>
@@ -1227,64 +1261,178 @@ function App() {
                             // Video player for YouTube/Spotify with thumbnails
                             <div className="w-full h-full">
                               {inputType === "Spotify" ? (
-                                // For Spotify, show thumbnail with audio-like styling
-                                <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 relative">
-                                  <div className="text-center">
-                                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                      {(videoInfo && videoInfo.title) ||
-                                        "Spotify Track"}
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      {(videoInfo && videoInfo.uploader) ||
-                                        "Spotify"}
-                                    </p>
-                                    <div className="text-xs text-green-600 dark:text-green-400 mt-2 flex items-center justify-center">
-                                      <span className="w-2 h-2 bg-green-500 rounded-full mr-1"></span>
-                                      Spotify Track
+                                // For Spotify, show YouTube video preview if available, otherwise show Spotify info
+                                videoInfo.video_url ? (
+                                  // Show YouTube video preview for Spotify track
+                                  <div className="w-full h-full relative">
+                                    <video
+                                      ref={videoRef}
+                                      className="w-full h-full object-cover rounded-lg"
+                                      onTimeUpdate={() => {
+                                        if (videoRef.current) {
+                                          setCurrentTime([
+                                            Math.floor(
+                                              videoRef.current.currentTime
+                                            ),
+                                          ]);
+                                        }
+                                      }}
+                                      onLoadedMetadata={() => {
+                                        if (videoRef.current) {
+                                          setCurrentTime([0]);
+                                          const d = Math.floor(
+                                            videoRef.current.duration || 300
+                                          );
+                                          setEndTime([d]);
+                                          setMediaDuration(
+                                            Number.isFinite(
+                                              videoRef.current.duration
+                                            )
+                                              ? d
+                                              : mediaDuration
+                                          );
+                                        }
+                                      }}
+                                      onError={() => {
+                                        setConsoleMessages((prev) => [
+                                          ...prev,
+                                          "Video preview not available",
+                                        ]);
+                                      }}
+                                      controls
+                                      preload="metadata"
+                                      poster={videoInfo?.thumbnail}
+                                    >
+                                      {videoInfo?.video_url && (
+                                        <source
+                                          src={videoInfo?.video_url}
+                                          type="video/mp4"
+                                        />
+                                      )}
+                                      Your browser does not support the video
+                                      tag.
+                                    </video>
+                                    {/* Spotify track info overlay */}
+                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3 rounded-b-lg">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                                        <p className="text-white text-sm font-medium truncate">
+                                          {videoInfo.title}
+                                        </p>
+                                      </div>
+                                      <p className="text-white/80 text-xs">
+                                        {videoInfo.uploader}
+                                        {typeof mediaDuration === "number" &&
+                                          ` • ${formatTimeToHHMMSS(
+                                            mediaDuration
+                                          )}`}
+                                      </p>
+                                      <p className="text-white/60 text-xs">
+                                        Found on YouTube for Spotify track
+                                      </p>
                                     </div>
                                   </div>
-                                </div>
+                                ) : (
+                                  // Fallback Spotify display without YouTube video
+                                  <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 relative">
+                                    {videoInfo.thumbnail && (
+                                      <img
+                                        src={videoInfo.thumbnail}
+                                        alt={videoInfo.title}
+                                        className="w-16 h-16 rounded-lg object-cover mb-3"
+                                      />
+                                    )}
+                                    <div className="text-center">
+                                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        {videoInfo.title || "Spotify Track"}
+                                      </p>
+                                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        {videoInfo.uploader || "Spotify"}
+                                      </p>
+                                      {videoInfo.duration && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                          Duration:{" "}
+                                          {formatTimeToHHMMSS(
+                                            videoInfo.duration
+                                          )}
+                                        </p>
+                                      )}
+                                      <div className="text-xs text-green-600 dark:text-green-400 mt-2 flex items-center justify-center">
+                                        <span className="w-2 h-2 bg-green-500 rounded-full mr-1"></span>
+                                        Spotify Track
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
                               ) : (
                                 // Regular video player for YouTube
-                                <video
-                                  ref={videoRef}
-                                  className="w-full h-full object-cover rounded-lg"
-                                  onTimeUpdate={() => {
-                                    if (videoRef.current) {
-                                      setCurrentTime([
-                                        Math.floor(
-                                          videoRef.current.currentTime
-                                        ),
+                                <div className="w-full h-full relative">
+                                  <video
+                                    ref={videoRef}
+                                    className="w-full h-full object-cover rounded-lg"
+                                    onTimeUpdate={() => {
+                                      if (videoRef.current) {
+                                        setCurrentTime([
+                                          Math.floor(
+                                            videoRef.current.currentTime
+                                          ),
+                                        ]);
+                                      }
+                                    }}
+                                    onLoadedMetadata={() => {
+                                      if (videoRef.current) {
+                                        setCurrentTime([0]);
+                                        const d = Math.floor(
+                                          videoRef.current.duration || 300
+                                        );
+                                        setEndTime([d]);
+                                        setMediaDuration(
+                                          Number.isFinite(
+                                            videoRef.current.duration
+                                          )
+                                            ? d
+                                            : mediaDuration
+                                        );
+                                      }
+                                    }}
+                                    onError={() => {
+                                      setConsoleMessages((prev) => [
+                                        ...prev,
+                                        "Video preview not available",
                                       ]);
-                                    }
-                                  }}
-                                  onLoadedMetadata={() => {
-                                    if (videoRef.current) {
-                                      setCurrentTime([0]);
-                                      setEndTime([
-                                        Math.floor(videoRef.current.duration),
-                                      ]);
-                                    }
-                                  }}
-                                  onError={() => {
-                                    setConsoleMessages((prev) => [
-                                      ...prev,
-                                      "Video preview not available",
-                                    ]);
-                                  }}
-                                  controls
-                                  preload="metadata"
-                                  poster={videoInfo?.thumbnail}
-                                >
-                                  {videoInfo?.video_url && (
-                                    <source
-                                      src={videoInfo?.video_url}
-                                      type="video/mp4"
-                                    />
-                                  )}
-                                  Your browser does not support the video tag.
-                                </video>
+                                    }}
+                                    controls
+                                    preload="metadata"
+                                    poster={videoInfo?.thumbnail}
+                                  >
+                                    {videoInfo?.video_url && (
+                                      <source
+                                        src={videoInfo?.video_url}
+                                        type="video/mp4"
+                                      />
+                                    )}
+                                    Your browser does not support the video tag.
+                                  </video>
+                                </div>
                               )}
+                            </div>
+                          ) : videoInfo?.title ? (
+                            // Fallback for videos without thumbnails
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700">
+                              <div className="text-center">
+                                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  {videoInfo.title}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {videoInfo.uploader || "Unknown Uploader"}
+                                </p>
+                                {typeof mediaDuration === "number" && (
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Duration:{" "}
+                                    {formatTimeToHHMMSS(mediaDuration)}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           ) : (
                             <img
@@ -1299,6 +1447,9 @@ function App() {
                           <AlertTriangleIcon className="h-8 w-8 mx-auto mb-1 text-red-400" />
                           <p className="text-xs text-red-400">
                             Error loading preview
+                          </p>
+                          <p className="text-xs text-red-300 mt-1">
+                            {videoInfo.error}
                           </p>
                         </div>
                       ) : (
@@ -1316,18 +1467,17 @@ function App() {
                   <div className="space-y-4">
                     <div>
                       <div className="space-y-4">
-                        {/* Scrub Timeline */}
-                        <div className="space-y-2">
-                          <label className="text-xs text-slate-400 block">
-                            {videoInfo?.title && videoInfo?.uploader
-                              ? `${videoInfo.title} - ${videoInfo.uploader}`
-                              : inputType === "LocalFile"
-                              ? "Audio Timeline"
-                              : inputType === "Spotify"
-                              ? "Track Timeline"
-                              : "Timeline"}
-                          </label>
-                        </div>
+                        {/* Video Info Display */}
+                        {videoInfo?.title && (
+                          <div className="space-y-2">
+                            <label className="text-xs text-slate-400 block">
+                              {videoInfo.title}
+                              {videoInfo.uploader && ` - ${videoInfo.uploader}`}
+                              {typeof mediaDuration === "number" &&
+                                ` (${formatTimeToHHMMSS(mediaDuration)})`}
+                            </label>
+                          </div>
+                        )}
 
                         {/* Time Sliders */}
                         <div className="space-y-3">
@@ -1352,22 +1502,22 @@ function App() {
                                         timeParts[0] * 3600 +
                                         timeParts[1] * 60 +
                                         timeParts[2];
+                                      const maxDuration =
+                                        (videoInfo?.duration ?? 300) - 5;
                                       if (
                                         seconds >= 0 &&
-                                        seconds <
-                                          (videoInfo?.duration || 300) - 5
+                                        seconds < maxDuration
                                       ) {
                                         setCurrentTime([seconds]);
                                         // Update media element position
-                                        if (videoRef.current) {
-                                          if (inputType === "LocalFile") {
-                                            (
-                                              videoRef.current as HTMLAudioElement
-                                            ).currentTime = seconds;
-                                          } else {
-                                            videoRef.current.currentTime =
+                                        if (inputType === "LocalFile") {
+                                          if (audioRef.current) {
+                                            audioRef.current.currentTime =
                                               seconds;
                                           }
+                                        } else if (videoRef.current) {
+                                          videoRef.current.currentTime =
+                                            seconds;
                                         }
                                       }
                                     }
@@ -1393,7 +1543,7 @@ function App() {
                                     }
                                   }
                                 }}
-                                max={(videoInfo?.duration || 300) - 5}
+                                max={(videoInfo?.duration ?? 300) - 5}
                                 step={1}
                                 className="w-full mt-2"
                               />
@@ -1418,9 +1568,11 @@ function App() {
                                         timeParts[0] * 3600 +
                                         timeParts[1] * 60 +
                                         timeParts[2];
+                                      const maxDuration =
+                                        videoInfo?.duration ?? 300;
                                       if (
                                         seconds > currentTime[0] + 5 &&
-                                        seconds <= (videoInfo?.duration || 300)
+                                        seconds <= maxDuration
                                       ) {
                                         setEndTime([seconds]);
                                       }
@@ -1433,12 +1585,17 @@ function App() {
                               <Slider
                                 value={endTime}
                                 onValueChange={(value) => {
-                                  if (value[0] > currentTime[0] + 5) {
+                                  const minValue = currentTime[0] + 5;
+                                  const maxValue = videoInfo?.duration ?? 300;
+                                  if (
+                                    value[0] > minValue &&
+                                    value[0] <= maxValue
+                                  ) {
                                     setEndTime([Math.floor(value[0])]);
                                   }
                                 }}
                                 min={5}
-                                max={videoInfo?.duration || 300}
+                                max={videoInfo?.duration ?? 300}
                                 step={1}
                                 className="w-full mt-2"
                               />
@@ -1772,17 +1929,6 @@ function App() {
                           return;
                         }
 
-                        if (e.shiftKey) {
-                          // Shift+click: Copy file path as text (old behavior)
-                          const textToCopy = file.file_path || file.name;
-                          navigator.clipboard.writeText(textToCopy);
-                          setConsoleMessages((prev) => [
-                            ...prev,
-                            `Copied file path "${textToCopy}" to clipboard.`,
-                          ]);
-                          return;
-                        }
-
                         if (file.file_path) {
                           try {
                             const result = await invoke<string>(
@@ -1829,8 +1975,7 @@ function App() {
                           </span>
                         </div>
                         <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                          Click to copy audio file for DAW pasting • Shift+click
-                          to copy path
+                          Click to copy audio file for DAW pasting
                         </div>
                       </div>
                       <div className="absolute bottom-2 right-2 flex gap-1">
