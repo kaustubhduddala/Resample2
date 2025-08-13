@@ -13,6 +13,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::UNIX_EPOCH;
+use tauri::path::BaseDirectory;
+use std::sync::{OnceLock, Mutex};
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VideoInfo {
@@ -52,6 +55,121 @@ enum InputType {
 }
 
 static CURRENT_DL_PID: AtomicI64 = AtomicI64::new(0);
+
+struct YtDlpManager {
+    binary_path: Option<PathBuf>,
+}
+
+impl YtDlpManager {
+    fn new() -> Self {
+        Self {
+            binary_path: None,
+        }
+    }
+
+    fn start(&mut self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        let yt_dlp_path = resolve_ytdlp_binary(app_handle)
+            .ok_or_else(|| "yt-dlp binary not found".to_string())?;
+        
+        // Cache the binary path for fast access
+        self.binary_path = Some(yt_dlp_path);
+        Ok(())
+    }
+
+    fn get_binary_path(&self) -> Option<&PathBuf> {
+        self.binary_path.as_ref()
+    }
+
+    fn is_running(&self) -> bool {
+        self.binary_path.is_some()
+    }
+
+    fn stop(&mut self) -> Result<(), String> {
+        self.binary_path = None;
+        Ok(())
+    }
+}
+
+// Global yt-dlp manager instance
+static YTDLP_MANAGER: OnceLock<Mutex<YtDlpManager>> = OnceLock::new();
+
+struct FFmpegManager {
+    ffmpeg_path: Option<PathBuf>,
+    ffprobe_path: Option<PathBuf>,
+}
+
+impl FFmpegManager {
+    fn new() -> Self {
+        Self {
+            ffmpeg_path: None,
+            ffprobe_path: None,
+        }
+    }
+
+    fn start(&mut self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        let ffmpeg_path = resolve_ff_binary(app_handle, "ffmpeg")
+            .ok_or_else(|| "ffmpeg binary not found".to_string())?;
+        let ffprobe_path = resolve_ff_binary(app_handle, "ffprobe")
+            .ok_or_else(|| "ffprobe binary not found".to_string())?;
+        
+        self.ffmpeg_path = Some(ffmpeg_path);
+        self.ffprobe_path = Some(ffprobe_path);
+        Ok(())
+    }
+
+    fn get_ffmpeg_path(&self) -> Option<&PathBuf> {
+        self.ffmpeg_path.as_ref()
+    }
+
+    fn get_ffprobe_path(&self) -> Option<&PathBuf> {
+        self.ffprobe_path.as_ref()
+    }
+
+    fn is_running(&self) -> bool {
+        self.ffmpeg_path.is_some() && self.ffprobe_path.is_some()
+    }
+
+    fn stop(&mut self) -> Result<(), String> {
+        self.ffmpeg_path = None;
+        self.ffprobe_path = None;
+        Ok(())
+    }
+}
+
+// Global ffmpeg manager instance
+static FFMPEG_MANAGER: OnceLock<Mutex<FFmpegManager>> = OnceLock::new();
+
+fn init_ytdlp_manager(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let manager_mutex = YTDLP_MANAGER.get_or_init(|| Mutex::new(YtDlpManager::new()));
+    
+    if let Ok(mut manager) = manager_mutex.lock() {
+        if !manager.is_running() {
+            manager.start(app_handle)?;
+        }
+    }
+    
+    Ok(())
+}
+
+fn get_ytdlp_manager() -> Option<std::sync::MutexGuard<'static, YtDlpManager>> {
+    YTDLP_MANAGER.get().and_then(|mutex| mutex.lock().ok())
+}
+
+fn init_ffmpeg_manager(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let manager_mutex = FFMPEG_MANAGER.get_or_init(|| Mutex::new(FFmpegManager::new()));
+    
+    if let Ok(mut manager) = manager_mutex.lock() {
+        if !manager.is_running() {
+            manager.start(app_handle)?;
+        }
+    }
+    
+    Ok(())
+}
+
+fn get_ffmpeg_manager() -> Option<std::sync::MutexGuard<'static, FFmpegManager>> {
+    FFMPEG_MANAGER.get().and_then(|mutex| mutex.lock().ok())
+}
 
 fn get_documents_dir() -> Result<PathBuf, String> {
     let docs_dir = dirs::home_dir()
@@ -257,27 +375,37 @@ async fn select_file() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn fetch_video_info(url: String) -> Result<VideoInfo, String> {
+async fn fetch_video_info(app_handle: tauri::AppHandle, url: String) -> Result<VideoInfo, String> {
     if url.trim().is_empty() {
         return Err("URL cannot be empty".to_string());
     }
 
-    // Check if yt-dlp is available
-    let yt_dlp_check = Command::new("yt-dlp")
-        .arg("--version")
-        .output();
-
-    if yt_dlp_check.is_err() {
-        return Err("yt-dlp is not installed or not available in PATH".to_string());
-    }
+    // Initialize yt-dlp manager
+    init_ytdlp_manager(&app_handle)?;
 
     // Check if it's a Spotify URL
     if url.contains("spotify.com") || url.contains("open.spotify.com") {
-        return handle_spotify_url(&url).await;
+        let yt_dlp_path = {
+            let manager = get_ytdlp_manager()
+                .ok_or("yt-dlp manager not available")?;
+            
+            manager.get_binary_path()
+                .ok_or("yt-dlp binary path not available")?
+                .clone()
+        };
+        
+        return handle_spotify_url(&url, &yt_dlp_path).await;
     }
 
-    // Use yt-dlp to extract video information for other URLs
-    let output = Command::new("yt-dlp")
+    // Use yt-dlp manager to extract video information for other URLs
+    let manager = get_ytdlp_manager()
+        .ok_or("yt-dlp manager not available")?;
+    
+    let yt_dlp_path = manager.get_binary_path()
+        .ok_or("yt-dlp binary path not available")?;
+    
+    // Use the cached binary path for fast execution
+    let output = Command::new(yt_dlp_path)
         .args(&[
             "--dump-json",
             "--no-playlist",
@@ -333,7 +461,7 @@ async fn fetch_video_info(url: String) -> Result<VideoInfo, String> {
     })
 }
 
-async fn handle_spotify_url(spotify_url: &str) -> Result<VideoInfo, String> {
+async fn handle_spotify_url(spotify_url: &str, yt_dlp_path: &PathBuf) -> Result<VideoInfo, String> {
     // Try to use Spotify oEmbed to get a clean title and artist
     #[derive(Deserialize)]
     struct SpotifyOembed {
@@ -367,7 +495,7 @@ async fn handle_spotify_url(spotify_url: &str) -> Result<VideoInfo, String> {
     }
 
     for search_query in queries.clone() {
-        let youtube_search_output = Command::new("yt-dlp")
+        let youtube_search_output = Command::new(&yt_dlp_path)
             .args(&[
                 &format!("ytsearch1:{}", search_query),
                 "--dump-json",
@@ -450,21 +578,73 @@ fn resolve_ff_binary(app_handle: &tauri::AppHandle, bin_name: &str) -> Option<Pa
         return Some(PathBuf::from(bin_name));
     }
 
-    // Try bundled resource path
-    if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        // resources/ffmpeg/<bin>
-        let mut candidate = resource_dir.clone();
-        candidate.push("resources/ffmpeg");
+    // Try bundled resource path using Tauri v2's correct method
+    #[cfg(target_os = "windows")]
+    {
+        let resource_path = format!("resources/ffmpeg/{}.exe", bin_name);
+        if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
+            if resolved_path.exists() {
+                return Some(resolved_path);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let resource_path = format!("resources/ffmpeg/{}", bin_name);
+        if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
+            if resolved_path.exists() {
+                return Some(resolved_path);
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let resource_path = format!("resources/ffmpeg/{}", bin_name);
+        if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
+            if resolved_path.exists() {
+                return Some(resolved_path);
+            }
+        }
+    }
 
-        // Platform specific executable name
-        #[cfg(target_os = "windows")]
-        let exe = format!("{}.exe", bin_name);
-        #[cfg(not(target_os = "windows"))]
-        let exe = bin_name.to_string();
+    None
+}
 
-        candidate.push(&exe);
-        if candidate.exists() {
-            return Some(candidate);
+fn resolve_ytdlp_binary(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    // Try PATH first
+    if which::which("yt-dlp").is_ok() {
+        return Some(PathBuf::from("yt-dlp"));
+    }
+
+    // Try bundled resource path using Tauri v2's correct method
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp.exe", BaseDirectory::Resource) {
+            if resource_path.exists() {
+                return Some(resource_path);
+            }
+        }
+        // Try x86 version as fallback
+        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp_x86.exe", BaseDirectory::Resource) {
+            if resource_path.exists() {
+                return Some(resource_path);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp_macos", BaseDirectory::Resource) {
+            if resource_path.exists() {
+                return Some(resource_path);
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp_macos", BaseDirectory::Resource) {
+            if resource_path.exists() {
+                return Some(resource_path);
+            }
         }
     }
 
@@ -510,8 +690,14 @@ async fn get_local_file_info(app_handle: tauri::AppHandle, file_path: String) ->
     }
 
     // Use ffprobe to get file information
-    let ffprobe_path = resolve_ff_binary(&app_handle, "ffprobe")
-        .ok_or_else(|| "ffprobe not found in PATH or bundled resources".to_string())?;
+    let ffprobe_path = {
+        let manager = get_ffmpeg_manager()
+            .ok_or("ffmpeg manager not available")?;
+        
+        manager.get_ffprobe_path()
+            .ok_or("ffprobe binary path not available")?
+            .clone()
+    };
 
     let output = Command::new(ffprobe_path)
         .args(&[
@@ -660,7 +846,16 @@ async fn unified_download(
             // If Spotify, resolve to a YouTube URL first
             let mut final_input = input.clone();
             if matches!(input_type, InputType::Spotify) {
-                if let Ok(info) = handle_spotify_url(&input).await {
+                let yt_dlp_path = {
+                    let manager = get_ytdlp_manager()
+                        .ok_or("yt-dlp manager not available")?;
+                    
+                    manager.get_binary_path()
+                        .ok_or("yt-dlp binary path not available")?
+                        .clone()
+                };
+                
+                if let Ok(info) = handle_spotify_url(&input, &yt_dlp_path).await {
                     if let Some(yurl) = info.video_url {
                         final_input = yurl;
                     }
@@ -668,13 +863,18 @@ async fn unified_download(
             }
 
             // Ensure ffmpeg/ffprobe are found by yt-dlp
-            let ffmpeg_path_opt = resolve_ff_binary(&app_handle, "ffmpeg");
-            let ffprobe_path_opt = resolve_ff_binary(&app_handle, "ffprobe");
-            if let (Some(ffmpeg_path), Some(_ffprobe_path)) = (ffmpeg_path_opt, ffprobe_path_opt) {
-                if let Some(dir) = ffmpeg_path.parent() {
-                    args.push("--ffmpeg-location".into());
-                    args.push(dir.to_string_lossy().to_string());
-                }
+            let ffmpeg_path = {
+                let manager = get_ffmpeg_manager()
+                    .ok_or("ffmpeg manager not available")?;
+                
+                manager.get_ffmpeg_path()
+                    .ok_or("ffmpeg binary path not available")?
+                    .clone()
+            };
+            
+            if let Some(dir) = ffmpeg_path.parent() {
+                args.push("--ffmpeg-location".into());
+                args.push(dir.to_string_lossy().to_string());
             }
 
             // Progress output (will parse from stdout)
@@ -745,21 +945,26 @@ async fn unified_download(
             args.push(final_input.clone());
 
             // Proactively kill any older lingering processes before starting a new one
+            // Note: yt-dlp is now a sidecar, so we only need to clean up ffmpeg processes
             #[cfg(target_os = "windows")]
             {
-                let _ = Command::new("taskkill").args(["/F", "/IM", "yt-dlp.exe"]).output();
-                let _ = Command::new("taskkill").args(["/F", "/IM", "spotdl.exe"]).output();
                 let _ = Command::new("taskkill").args(["/F", "/IM", "ffmpeg.exe"]).output();
             }
             #[cfg(not(target_os = "windows"))]
             {
-                let _ = Command::new("pkill").args(["-f", "yt-dlp"]).output();
-                let _ = Command::new("pkill").args(["-f", "spotdl"]).output();
                 let _ = Command::new("pkill").args(["-f", "ffmpeg"]).output();
             }
 
             // Spawn yt-dlp and stream progress
-            let mut child = TokioCommand::new("yt-dlp")
+            let yt_dlp_path = {
+                let manager = get_ytdlp_manager()
+                    .ok_or("yt-dlp manager not available")?;
+                
+                manager.get_binary_path()
+                    .ok_or("yt-dlp binary path not available")?
+                    .clone()
+            };
+            let mut child = TokioCommand::new(&yt_dlp_path)
                 .args(args)
                 .stderr(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
@@ -804,13 +1009,18 @@ async fn unified_download(
                 let mut retry_args: Vec<String> = Vec::new();
 
                 // ffmpeg location
-                let ffmpeg_path_opt = resolve_ff_binary(&app_handle, "ffmpeg");
-                let ffprobe_path_opt = resolve_ff_binary(&app_handle, "ffprobe");
-                if let (Some(ffmpeg_path), Some(_ffprobe_path)) = (ffmpeg_path_opt, ffprobe_path_opt) {
-                    if let Some(dir) = ffmpeg_path.parent() {
-                        retry_args.push("--ffmpeg-location".into());
-                        retry_args.push(dir.to_string_lossy().to_string());
-                    }
+                let ffmpeg_path = {
+                    let manager = get_ffmpeg_manager()
+                        .ok_or("ffmpeg manager not available")?;
+                    
+                    manager.get_ffmpeg_path()
+                        .ok_or("ffmpeg binary path not available")?
+                        .clone()
+                };
+                
+                if let Some(dir) = ffmpeg_path.parent() {
+                    retry_args.push("--ffmpeg-location".into());
+                    retry_args.push(dir.to_string_lossy().to_string());
                 }
 
                 retry_args.push("-o".into());
@@ -845,7 +1055,7 @@ async fn unified_download(
 
                 retry_args.push(final_input.clone());
 
-                let retry_status = TokioCommand::new("yt-dlp")
+                let retry_status = TokioCommand::new(&yt_dlp_path)
                     .args(retry_args)
                     .stderr(std::process::Stdio::inherit())
                     .stdout(std::process::Stdio::inherit())
@@ -1117,19 +1327,13 @@ async fn stop_download() -> Result<(), String> {
     let pid = CURRENT_DL_PID.load(Ordering::SeqCst);
     if pid <= 0 {
         // Even if we have no recorded PID, attempt aggressive cleanup of known tools
+        // Note: yt-dlp is now a sidecar, so we only need to clean up ffmpeg processes
         #[cfg(target_os = "windows")]
         {
-            let _ = Command::new("taskkill").args(["/F", "/IM", "yt-dlp.exe"]).output();
-            let _ = Command::new("taskkill").args(["/F", "/IM", "spotdl.exe"]).output();
-            let _ = Command::new("taskkill").args(["/F", "/IM", "python.exe"]).output();
             let _ = Command::new("taskkill").args(["/F", "/IM", "ffmpeg.exe"]).output();
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = Command::new("pkill").args(["-9", "-f", "yt-dlp"]).output();
-            let _ = Command::new("pkill").args(["-f", "yt-dlp"]).output();
-            let _ = Command::new("pkill").args(["-9", "-f", "spotdl"]).output();
-            let _ = Command::new("pkill").args(["-f", "spotdl"]).output();
             let _ = Command::new("pkill").args(["-9", "-f", "ffmpeg"]).output();
             let _ = Command::new("pkill").args(["-f", "ffmpeg"]).output();
         }
@@ -1161,19 +1365,13 @@ async fn stop_download() -> Result<(), String> {
     CURRENT_DL_PID.store(0, Ordering::SeqCst);
 
     // After killing the specific PID, also do an aggressive cleanup to ensure child processes are gone
+    // Note: yt-dlp is now a sidecar, so we only need to clean up ffmpeg processes
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("taskkill").args(["/F", "/IM", "yt-dlp.exe"]).output();
-        let _ = Command::new("taskkill").args(["/F", "/IM", "spotdl.exe"]).output();
-        let _ = Command::new("taskkill").args(["/F", "/IM", "python.exe"]).output();
         let _ = Command::new("taskkill").args(["/F", "/IM", "ffmpeg.exe"]).output();
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = Command::new("pkill").args(["-9", "-f", "yt-dlp"]).output();
-        let _ = Command::new("pkill").args(["-f", "yt-dlp"]).output();
-        let _ = Command::new("pkill").args(["-9", "-f", "spotdl"]).output();
-        let _ = Command::new("pkill").args(["-f", "spotdl"]).output();
         let _ = Command::new("pkill").args(["-9", "-f", "ffmpeg"]).output();
         let _ = Command::new("pkill").args(["-f", "ffmpeg"]).output();
     }
@@ -1184,6 +1382,19 @@ async fn stop_download() -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+                            .setup(|app| {
+                        // Initialize yt-dlp manager when the app starts
+                        if let Err(e) = init_ytdlp_manager(&app.app_handle()) {
+                            eprintln!("Failed to initialize yt-dlp manager: {}", e);
+                        }
+                        
+                        // Initialize ffmpeg manager when the app starts
+                        if let Err(e) = init_ffmpeg_manager(&app.app_handle()) {
+                            eprintln!("Failed to initialize ffmpeg manager: {}", e);
+                        }
+                        
+                        Ok(())
+                    })
         .invoke_handler(tauri::generate_handler![
             load_settings,
             save_settings,

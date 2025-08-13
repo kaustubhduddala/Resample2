@@ -42,7 +42,10 @@
       "resources/ffmpeg/ffmpeg": "resources/ffmpeg/ffmpeg",
       "resources/ffmpeg/ffprobe": "resources/ffmpeg/ffprobe",
       "resources/ffmpeg/ffmpeg.exe": "resources/ffmpeg/ffmpeg.exe",
-      "resources/ffmpeg/ffprobe.exe": "resources/ffmpeg/ffprobe.exe"
+      "resources/ffmpeg/ffprobe.exe": "resources/ffmpeg/ffprobe.exe",
+      "resources/yt-dlp/yt-dlp.exe": "resources/yt-dlp/yt-dlp.exe",
+      "resources/yt-dlp/yt-dlp_x86.exe": "resources/yt-dlp/yt-dlp_x86.exe",
+      "resources/yt-dlp/yt-dlp_macos": "resources/yt-dlp/yt-dlp_macos"
     }
   }
 } 
