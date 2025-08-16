@@ -18,7 +18,6 @@ import {
   Save,
   RotateCcw,
   Download,
-  Database,
   Search,
   Loader2,
   RefreshCw,
@@ -26,6 +25,7 @@ import {
   Info,
 } from "lucide-react";
 import { useTheme } from "./hooks/use-theme";
+import { useModelCache } from "./hooks/use-model-cache";
 
 const TABS = [
   "General",
@@ -120,11 +120,6 @@ interface Settings {
   // Model management settings
   model_directory: string;
   enable_stem_extraction: boolean;
-}
-
-interface DownloadedModel {
-  filename: string;
-  friendly_name: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -238,20 +233,26 @@ export function SettingsPage({
   // const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Model download states
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  // Model download states - using cached models
+  const {
+    models,
+    isLoading: isLoadingModels,
+    getModelsCount,
+    downloadModel,
+  } = useModelCache();
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isDownloadingModels, setIsDownloadingModels] = useState(false);
   const [modelSearchTerm, setModelSearchTerm] = useState("");
   const [modelFilter, setModelFilter] = useState("all");
 
-  // Downloaded models states
-  const [downloadedModels, setDownloadedModels] = useState<DownloadedModel[]>(
-    []
-  );
-  const [isLoadingDownloadedModels, setIsLoadingDownloadedModels] =
-    useState(false);
+  // Downloaded models states - using cached models
+  const {
+    downloadedModels,
+    isLoading: isLoadingDownloadedModels,
+    refreshDownloadedModels,
+    getDownloadedModelsCount,
+    setModelDirectory,
+  } = useModelCache();
   const [confirmingDeleteModel, setConfirmingDeleteModel] = useState<
     string | null
   >(null);
@@ -261,20 +262,24 @@ export function SettingsPage({
 
   const { setTheme } = useTheme();
 
-  // Load models and downloaded models when Download Manager tab is opened
-  useEffect(() => {
-    if (activeTab === "Download Manager") {
-      loadModels();
-      loadDownloadedModels();
-    }
-  }, [activeTab]);
-
-  // Load settings and models on component mount
+  // Load settings on component mount
   useEffect(() => {
     loadSettings();
-    loadModels();
-    loadDownloadedModels();
   }, []);
+
+  // Auto-refresh downloaded models when settings page opens
+  useEffect(() => {
+    if (settings.model_directory) {
+      refreshDownloadedModels(settings.model_directory);
+    }
+  }, [settings.model_directory, refreshDownloadedModels]);
+
+  // Set model directory in cache when settings change
+  useEffect(() => {
+    if (settings.model_directory) {
+      setModelDirectory(settings.model_directory);
+    }
+  }, [settings.model_directory, setModelDirectory]);
 
   useEffect(() => {
     const hasChanges =
@@ -363,37 +368,6 @@ export function SettingsPage({
     setHasUnsavedChanges(true);
   };
 
-  const loadModels = async () => {
-    try {
-      setIsLoadingModels(true);
-      const modelList = await invoke<ModelInfo[]>("list_separation_models");
-      setModels(modelList);
-    } catch (error) {
-      console.error("Failed to load models:", error);
-      setModels([]);
-    } finally {
-      setIsLoadingModels(false);
-    }
-  };
-
-  const loadDownloadedModels = async () => {
-    try {
-      setIsLoadingDownloadedModels(true);
-      const downloadedList = await invoke<DownloadedModel[]>(
-        "list_downloaded_models",
-        {
-          modelDirectory: settings.model_directory,
-        }
-      );
-      setDownloadedModels(downloadedList);
-    } catch (error) {
-      console.error("Failed to load downloaded models:", error);
-      setDownloadedModels([]);
-    } finally {
-      setIsLoadingDownloadedModels(false);
-    }
-  };
-
   const deleteDownloadedModel = async (modelFilename: string) => {
     if (confirmingDeleteModel === modelFilename) {
       // Confirm deletion
@@ -403,7 +377,7 @@ export function SettingsPage({
           modelFilename,
         });
         // Reload the list after deletion
-        await loadDownloadedModels();
+        await refreshDownloadedModels(settings.model_directory);
         setConfirmingDeleteModel(null);
       } catch (error) {
         // Remove console.error statement
@@ -436,10 +410,7 @@ export function SettingsPage({
       // Download each selected model using audio-separator
       for (const modelFilename of selectedModels) {
         try {
-          await invoke("download_separation_model", {
-            modelFilename,
-            modelDirectory: settings.model_directory,
-          });
+          await downloadModel(modelFilename, settings.model_directory);
         } catch (error) {
           // Remove console.error statement
         }
@@ -448,7 +419,7 @@ export function SettingsPage({
       setSelectedModels([]);
 
       // Automatically refresh downloaded models after download
-      await loadDownloadedModels();
+      await refreshDownloadedModels(settings.model_directory);
 
       // Also refresh the main app's downloaded models if callback is provided
       if (onRefreshDownloadedModels) {
@@ -1355,8 +1326,11 @@ export function SettingsPage({
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  Model Download Manager
+                <CardTitle className="flex items-center justify-between">
+                  <span>Model Download Manager</span>
+                  <span className="text-sm font-normal text-gray-500">
+                    {getModelsCount()} models found
+                  </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1369,9 +1343,10 @@ export function SettingsPage({
                     <Input
                       value={settings.model_directory}
                       placeholder="Model storage directory"
-                      onChange={(e) =>
-                        updateSetting("model_directory", e.target.value)
-                      }
+                      onChange={(e) => {
+                        updateSetting("model_directory", e.target.value);
+                        setModelDirectory(e.target.value);
+                      }}
                       className="flex-1"
                     />
                     <Button
@@ -1382,6 +1357,7 @@ export function SettingsPage({
                             "select_folder"
                           );
                           updateSetting("model_directory", selectedPath);
+                          setModelDirectory(selectedPath);
                         } catch (error) {
                           console.error("Failed to select folder:", error);
                         }
@@ -1419,14 +1395,17 @@ export function SettingsPage({
                     </SelectContent>
                   </Select>
                   <Button
-                    onClick={loadModels}
-                    disabled={isLoadingModels}
+                    onClick={() =>
+                      refreshDownloadedModels(settings.model_directory)
+                    }
+                    disabled={isLoadingDownloadedModels}
                     variant="outline"
+                    title="Refresh downloaded models"
                   >
-                    {isLoadingModels ? (
+                    {isLoadingDownloadedModels ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <Database className="h-4 w-4" />
+                      <RefreshCw className="h-4 w-4" />
                     )}
                   </Button>
                 </div>
@@ -1517,8 +1496,11 @@ export function SettingsPage({
             {/* Downloaded Models Section */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  Downloaded Models
+                <CardTitle className="flex items-center justify-between">
+                  <span>Downloaded Models</span>
+                  <span className="text-sm font-normal text-gray-500">
+                    {getDownloadedModelsCount()} models
+                  </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1527,7 +1509,9 @@ export function SettingsPage({
                     Models stored in: {settings.model_directory || "Not set"}
                   </p>
                   <Button
-                    onClick={loadDownloadedModels}
+                    onClick={() =>
+                      refreshDownloadedModels(settings.model_directory)
+                    }
                     disabled={isLoadingDownloadedModels}
                     variant="outline"
                     size="sm"

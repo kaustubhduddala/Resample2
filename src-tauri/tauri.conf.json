@@ -43,9 +43,8 @@
       "resources/ffmpeg/ffprobe": "resources/ffmpeg/ffprobe",
       "resources/ffmpeg/ffmpeg.exe": "resources/ffmpeg/ffmpeg.exe",
       "resources/ffmpeg/ffprobe.exe": "resources/ffmpeg/ffprobe.exe",
-      "resources/yt-dlp/yt-dlp.exe": "resources/yt-dlp/yt-dlp.exe",
-      "resources/yt-dlp/yt-dlp_x86.exe": "resources/yt-dlp/yt-dlp_x86.exe",
-      "resources/yt-dlp/yt-dlp_macos": "resources/yt-dlp/yt-dlp_macos"
+      "resources/yt-dlp/dist/yt-dlp": "resources/yt-dlp/dist/yt-dlp",
+      "resources/audio-separator/dist/audio-separator": "resources/audio-separator/dist/audio-separator"
     }
   }
 } 

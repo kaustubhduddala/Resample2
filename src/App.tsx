@@ -65,17 +65,24 @@ interface DownloadProgress {
   status: string; // "downloading", "processing", "completed", "error"
 }
 
+interface SeparationResult {
+  success: boolean;
+  message: string;
+  output_files: string[];
+}
+
+// GPUInfo interface removed because GPU auto-detection is currently unused in UI
+
+interface DownloadedModel {
+  filename: string;
+  friendly_name: string;
+}
+
 interface ModelInfo {
   filename: string;
   arch: string;
   output_stems: string;
   friendly_name: string;
-}
-
-interface SeparationResult {
-  success: boolean;
-  message: string;
-  output_files: string[];
 }
 
 interface SeparationSettings {
@@ -283,7 +290,7 @@ function App() {
     model_filename: "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
     output_format: "WAV",
     output_dir: "",
-    model_file_dir: "/tmp/audio-separator-models/",
+    model_file_dir: "", // Will be set dynamically based on user's model directory
     normalization: 0.9,
     amplification: 0.0,
     single_stem: undefined,
@@ -464,6 +471,8 @@ function App() {
     );
   };
 
+  // Removed separate stem handler; main process button now handles extraction
+
   const formatTimeToHHMMSS = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -624,6 +633,84 @@ function App() {
       const selectionEnd = Math.floor(endTime[0] ?? 0);
       const hasSelection = selectionEnd > selectionStart;
 
+      // If user selected ExtractOnly, skip unified_download and just separate the local file
+      if (processingMode === "ExtractOnly" && selectedModel) {
+        setConsoleMessages((prev) => [...prev, "Starting stem separation..."]);
+        setIsSeparating(true);
+        setProgressStatus("processing");
+
+        try {
+          // Auto-detect GPU capabilities and set appropriate settings
+          let gpuInfo: {
+            gpu_type: string;
+            is_available: boolean;
+            description: string;
+          };
+          try {
+            gpuInfo = await invoke<{
+              gpu_type: string;
+              is_available: boolean;
+              description: string;
+            }>("detect_gpu_capabilities");
+            setConsoleMessages((prev) => [
+              ...prev,
+              `GPU detected: ${gpuInfo.description}`,
+            ]);
+          } catch (error) {
+            setConsoleMessages((prev) => [
+              ...prev,
+              `GPU detection failed, using CPU: ${error}`,
+            ]);
+            gpuInfo = {
+              gpu_type: "cpu",
+              is_available: false,
+              description: "CPU fallback",
+            };
+          }
+
+          const separationResult = await invoke<SeparationResult>(
+            "perform_audio_separation",
+            {
+              inputFile: url,
+              settings: {
+                ...separationSettings,
+                model_filename: selectedModel,
+                model_file_dir: settings.model_directory || "",
+                single_stem:
+                  selectedStems.length === 1 ? selectedStems[0] : undefined,
+                use_gpu: gpuInfo.is_available,
+                use_autocast:
+                  gpuInfo.is_available && gpuInfo.gpu_type !== "cpu",
+              },
+              selectedStems: selectedStems,
+            }
+          );
+
+          if (separationResult.success) {
+            setConsoleMessages((prev) => [
+              ...prev,
+              "Stem separation completed successfully!",
+            ]);
+            await refreshAudioFileHistory();
+          } else {
+            setConsoleMessages((prev) => [
+              ...prev,
+              `Stem separation failed: ${separationResult.message}`,
+            ]);
+          }
+        } catch (error) {
+          setConsoleMessages((prev) => [
+            ...prev,
+            `Stem separation error: ${error}`,
+          ]);
+        } finally {
+          setIsSeparating(false);
+          setIsDownloading(false);
+          setProgressStatus("idle");
+        }
+        return;
+      }
+
       // Use unified download for all input types
       const result = await invoke<DownloadResult>("unified_download", {
         input: url,
@@ -656,17 +743,49 @@ function App() {
           setProgressStatus("processing");
 
           try {
+            // Auto-detect GPU capabilities and set appropriate settings
+            let gpuInfo: {
+              gpu_type: string;
+              is_available: boolean;
+              description: string;
+            };
+            try {
+              gpuInfo = await invoke<{
+                gpu_type: string;
+                is_available: boolean;
+                description: string;
+              }>("detect_gpu_capabilities");
+              setConsoleMessages((prev) => [
+                ...prev,
+                `GPU detected: ${gpuInfo.description}`,
+              ]);
+            } catch (error) {
+              setConsoleMessages((prev) => [
+                ...prev,
+                `GPU detection failed, using CPU: ${error}`,
+              ]);
+              gpuInfo = {
+                gpu_type: "cpu",
+                is_available: false,
+                description: "CPU fallback",
+              };
+            }
+
             const separationResult = await invoke<SeparationResult>(
-              "separate_audio",
+              "perform_audio_separation",
               {
                 inputFile: result.file_path,
                 settings: {
                   ...separationSettings,
                   model_filename: selectedModel,
+                  model_file_dir: settings.model_directory || "",
                   single_stem:
-                    selectedStems.length === 1 ? selectedStems[0] : null,
+                    selectedStems.length === 1 ? selectedStems[0] : undefined,
+                  use_gpu: gpuInfo.is_available,
+                  use_autocast:
+                    gpuInfo.is_available && gpuInfo.gpu_type !== "cpu",
                 },
-                modelDirectory: settings.model_directory,
+                selectedStems: selectedStems,
               }
             );
 
@@ -811,23 +930,111 @@ function App() {
     e.preventDefault();
   };
 
-  // Load available stems when component mounts
-  useEffect(() => {
-    const loadAvailableStems = async () => {
-      try {
-        const modelList = await invoke<ModelInfo[]>("list_separation_models");
+  // Function to load available stems and models
+  const loadAvailableStemsAndModels = async () => {
+    try {
+      // Get the model directory from settings
+      const settingsJson = await invoke<string>("load_settings");
+      const settings = JSON.parse(settingsJson) as Settings;
+      const modelDirectory = settings?.model_directory || "";
+
+      if (!modelDirectory) {
+        setConsoleMessages((prev) => [
+          ...prev,
+          "No model directory set. Please configure in Settings → Download Manager",
+        ]);
+        return;
+      }
+
+      // Get downloaded models from the model directory
+      const downloadedModels = await invoke<DownloadedModel[]>(
+        "list_downloaded_models",
+        {
+          modelDirectory: modelDirectory,
+        }
+      );
+
+      // Also get the full catalog so we can attach correct stems/arch
+      const catalog = await invoke<ModelInfo[]>("list_separation_models");
+
+      const normalize = (s: string) =>
+        s
+          .toLowerCase()
+          .replace(/\.(pth|ckpt|onnx|safetensors|bin)$/i, "")
+          .replace(/[\s_\-]+/g, "");
+
+      const byFilename = new Map<string, ModelInfo>();
+      const byFriendly = new Map<string, ModelInfo>();
+      catalog.forEach((mi) => {
+        byFilename.set(mi.filename.toLowerCase(), mi);
+        byFriendly.set(normalize(mi.friendly_name), mi);
+        byFriendly.set(normalize(mi.filename), mi);
+      });
+
+      // Build available models using accurate stems from the catalog when possible
+      const availableModels: SimpleModelInfo[] = downloadedModels.map((dl) => {
+        const match =
+          byFilename.get(dl.filename.toLowerCase()) ||
+          byFriendly.get(normalize(dl.filename)) ||
+          byFriendly.get(normalize(dl.friendly_name));
+
+        if (match) {
+          return {
+            filename: dl.filename,
+            arch: match.arch,
+            output_stems: match.output_stems,
+            friendly_name: match.friendly_name || dl.friendly_name,
+          };
+        }
+
+        // Fallback when no catalog match was found
+        return {
+          filename: dl.filename,
+          arch: dl.filename.split("_")[0] || "Unknown",
+          output_stems: "vocals,drums,bass,other",
+          friendly_name: dl.filename
+            .replace(/\.(pth|ckpt|onnx|safetensors|bin)$/i, "")
+            .replace(/_/g, " ")
+            .replace(/-/g, " "),
+        };
+      });
+
+      // Set the models for the stems card (only downloaded ones)
+      setSimpleModels(availableModels);
+
+      // If a model is already selected, refresh its stems; otherwise build the union
+      if (selectedModel) {
+        const m = availableModels.find((m) => m.filename === selectedModel);
+        setAvailableStems(
+          m ? m.output_stems.split(",").map((s) => s.trim()) : []
+        );
+      } else {
         const allStems = new Set<string>();
-        modelList.forEach((model) => {
-          const stems = model.output_stems.split(",").map((s) => s.trim());
-          stems.forEach((stem) => allStems.add(stem));
+        availableModels.forEach((model) => {
+          model.output_stems
+            .split(",")
+            .map((s) => s.trim())
+            .forEach((stem) => allStems.add(stem));
         });
         setAvailableStems(Array.from(allStems));
-      } catch (error) {
-        console.error("Failed to load available stems:", error);
       }
-    };
 
-    loadAvailableStems();
+      setConsoleMessages((prev) => [
+        ...prev,
+        `Loaded ${availableModels.length} downloaded models`,
+      ]);
+    } catch (error) {
+      console.error("Failed to load available stems and models:", error);
+      setConsoleMessages((prev) => [
+        ...prev,
+        `Failed to load models: ${error}`,
+      ]);
+    }
+  };
+
+  // Load available stems and models when component mounts
+  useEffect(() => {
+    loadAvailableStemsAndModels();
   }, []);
 
   // Listen for download progress events
@@ -1009,11 +1216,18 @@ function App() {
               const settingsJson = await invoke<string>("load_settings");
               const loadedSettings = JSON.parse(settingsJson);
               setSettings(loadedSettings);
+
+              // Refresh the stems section with new models
+              await loadAvailableStemsAndModels();
             } catch (error) {
               console.error("Failed to reload settings after save:", error);
             }
           };
           reloadSettings();
+        }}
+        onRefreshDownloadedModels={async () => {
+          // Refresh the stems section when models are downloaded
+          await loadAvailableStemsAndModels();
         }}
       />
     );

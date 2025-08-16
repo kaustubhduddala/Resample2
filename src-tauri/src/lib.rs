@@ -14,7 +14,6 @@ use tokio::process::Command as TokioCommand;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::UNIX_EPOCH;
 use tauri::path::BaseDirectory;
-use std::sync::{OnceLock, Mutex};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,121 +53,92 @@ enum InputType {
     Unknown,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ModelInfo {
+    filename: String,
+    arch: String,
+    output_stems: String,
+    friendly_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DownloadedModel {
+    filename: String,
+    friendly_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SeparationSettings {
+    model_filename: String,
+    output_format: String,
+    output_dir: String,
+    model_file_dir: String,
+    normalization: f64,
+    amplification: f64,
+    single_stem: Option<String>,
+    sample_rate: u32,
+    use_autocast: bool,
+    use_gpu: bool,
+    gpu_type: String,
+    mdx_segment_size: u32,
+    mdx_overlap: f64,
+    mdx_batch_size: u32,
+    mdx_enable_denoise: bool,
+    vr_batch_size: u32,
+    vr_window_size: u32,
+    vr_aggression: u32,
+    vr_enable_tta: bool,
+    vr_high_end_process: bool,
+    vr_enable_post_process: bool,
+    vr_post_process_threshold: f64,
+    demucs_segment_size: String,
+    demucs_shifts: u32,
+    demucs_overlap: f64,
+    demucs_segments_enabled: bool,
+    mdxc_segment_size: u32,
+    mdxc_override_model_segment_size: bool,
+    mdxc_overlap: u32,
+    mdxc_batch_size: u32,
+    mdxc_pitch_shift: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SeparationResult {
+    success: bool,
+    message: String,
+    output_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GPUInfo {
+    gpu_type: String,
+    is_available: bool,
+    description: String,
+}
+
 static CURRENT_DL_PID: AtomicI64 = AtomicI64::new(0);
 
-struct YtDlpManager {
-    binary_path: Option<PathBuf>,
+// Binary path resolution for yt-dlp
+fn get_ytdlp_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    resolve_ytdlp_binary(app_handle)
+        .ok_or_else(|| "yt-dlp binary not found".to_string())
 }
 
-impl YtDlpManager {
-    fn new() -> Self {
-        Self {
-            binary_path: None,
-        }
-    }
-
-    fn start(&mut self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let yt_dlp_path = resolve_ytdlp_binary(app_handle)
-            .ok_or_else(|| "yt-dlp binary not found".to_string())?;
-        
-        // Cache the binary path for fast access
-        self.binary_path = Some(yt_dlp_path);
-        Ok(())
-    }
-
-    fn get_binary_path(&self) -> Option<&PathBuf> {
-        self.binary_path.as_ref()
-    }
-
-    fn is_running(&self) -> bool {
-        self.binary_path.is_some()
-    }
-
-    fn stop(&mut self) -> Result<(), String> {
-        self.binary_path = None;
-        Ok(())
-    }
+// Binary path resolution for ffmpeg binaries
+fn get_ffmpeg_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    resolve_ff_binary(app_handle, "ffmpeg")
+        .ok_or_else(|| "ffmpeg binary not found".to_string())
 }
 
-// Global yt-dlp manager instance
-static YTDLP_MANAGER: OnceLock<Mutex<YtDlpManager>> = OnceLock::new();
-
-struct FFmpegManager {
-    ffmpeg_path: Option<PathBuf>,
-    ffprobe_path: Option<PathBuf>,
+fn get_ffprobe_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    resolve_ff_binary(app_handle, "ffprobe")
+        .ok_or_else(|| "ffprobe binary not found".to_string())
 }
 
-impl FFmpegManager {
-    fn new() -> Self {
-        Self {
-            ffmpeg_path: None,
-            ffprobe_path: None,
-        }
-    }
-
-    fn start(&mut self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let ffmpeg_path = resolve_ff_binary(app_handle, "ffmpeg")
-            .ok_or_else(|| "ffmpeg binary not found".to_string())?;
-        let ffprobe_path = resolve_ff_binary(app_handle, "ffprobe")
-            .ok_or_else(|| "ffprobe binary not found".to_string())?;
-        
-        self.ffmpeg_path = Some(ffmpeg_path);
-        self.ffprobe_path = Some(ffprobe_path);
-        Ok(())
-    }
-
-    fn get_ffmpeg_path(&self) -> Option<&PathBuf> {
-        self.ffmpeg_path.as_ref()
-    }
-
-    fn get_ffprobe_path(&self) -> Option<&PathBuf> {
-        self.ffprobe_path.as_ref()
-    }
-
-    fn is_running(&self) -> bool {
-        self.ffmpeg_path.is_some() && self.ffprobe_path.is_some()
-    }
-
-    fn stop(&mut self) -> Result<(), String> {
-        self.ffmpeg_path = None;
-        self.ffprobe_path = None;
-        Ok(())
-    }
-}
-
-// Global ffmpeg manager instance
-static FFMPEG_MANAGER: OnceLock<Mutex<FFmpegManager>> = OnceLock::new();
-
-fn init_ytdlp_manager(app_handle: &tauri::AppHandle) -> Result<(), String> {
-    let manager_mutex = YTDLP_MANAGER.get_or_init(|| Mutex::new(YtDlpManager::new()));
-    
-    if let Ok(mut manager) = manager_mutex.lock() {
-        if !manager.is_running() {
-            manager.start(app_handle)?;
-        }
-    }
-    
-    Ok(())
-}
-
-fn get_ytdlp_manager() -> Option<std::sync::MutexGuard<'static, YtDlpManager>> {
-    YTDLP_MANAGER.get().and_then(|mutex| mutex.lock().ok())
-}
-
-fn init_ffmpeg_manager(app_handle: &tauri::AppHandle) -> Result<(), String> {
-    let manager_mutex = FFMPEG_MANAGER.get_or_init(|| Mutex::new(FFmpegManager::new()));
-    
-    if let Ok(mut manager) = manager_mutex.lock() {
-        if !manager.is_running() {
-            manager.start(app_handle)?;
-        }
-    }
-    
-    Ok(())
-}
-
-fn get_ffmpeg_manager() -> Option<std::sync::MutexGuard<'static, FFmpegManager>> {
-    FFMPEG_MANAGER.get().and_then(|mutex| mutex.lock().ok())
+// Binary path resolution for audio-separator
+fn get_audio_separator_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    resolve_audio_separator_binary(app_handle)
+        .ok_or_else(|| "audio-separator binary not found".to_string())
 }
 
 fn get_documents_dir() -> Result<PathBuf, String> {
@@ -380,29 +350,13 @@ async fn fetch_video_info(app_handle: tauri::AppHandle, url: String) -> Result<V
         return Err("URL cannot be empty".to_string());
     }
 
-    // Initialize yt-dlp manager
-    init_ytdlp_manager(&app_handle)?;
+    // Get yt-dlp binary path
+    let yt_dlp_path = get_ytdlp_binary(&app_handle)?;
 
     // Check if it's a Spotify URL
     if url.contains("spotify.com") || url.contains("open.spotify.com") {
-        let yt_dlp_path = {
-            let manager = get_ytdlp_manager()
-                .ok_or("yt-dlp manager not available")?;
-            
-            manager.get_binary_path()
-                .ok_or("yt-dlp binary path not available")?
-                .clone()
-        };
-        
         return handle_spotify_url(&url, &yt_dlp_path).await;
     }
-
-    // Use yt-dlp manager to extract video information for other URLs
-    let manager = get_ytdlp_manager()
-        .ok_or("yt-dlp manager not available")?;
-    
-    let yt_dlp_path = manager.get_binary_path()
-        .ok_or("yt-dlp binary path not available")?;
     
     // Use the cached binary path for fast execution
     let output = Command::new(yt_dlp_path)
@@ -575,6 +529,7 @@ fn extract_spotify_track_id(url: &str) -> Result<String, String> {
 fn resolve_ff_binary(app_handle: &tauri::AppHandle, bin_name: &str) -> Option<PathBuf> {
     // Try PATH first
     if which::which(bin_name).is_ok() {
+        println!("[DEBUG] {} found in PATH", bin_name);
         return Some(PathBuf::from(bin_name));
     }
 
@@ -583,7 +538,9 @@ fn resolve_ff_binary(app_handle: &tauri::AppHandle, bin_name: &str) -> Option<Pa
     {
         let resource_path = format!("resources/ffmpeg/{}.exe", bin_name);
         if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
+            println!("[DEBUG] Trying Windows {} path: {:?}", bin_name, resolved_path);
             if resolved_path.exists() {
+                println!("[DEBUG] Windows {} found at: {:?}", bin_name, resolved_path);
                 return Some(resolved_path);
             }
         }
@@ -592,62 +549,85 @@ fn resolve_ff_binary(app_handle: &tauri::AppHandle, bin_name: &str) -> Option<Pa
     {
         let resource_path = format!("resources/ffmpeg/{}", bin_name);
         if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
+            println!("[DEBUG] Trying macOS {} path: {:?}", bin_name, resolved_path);
             if resolved_path.exists() {
-                return Some(resolved_path);
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let resource_path = format!("resources/ffmpeg/{}", bin_name);
-        if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
-            if resolved_path.exists() {
+                println!("[DEBUG] macOS {} found at: {:?}", bin_name, resolved_path);
                 return Some(resolved_path);
             }
         }
     }
 
+    println!("[DEBUG] {} binary not found", bin_name);
     None
 }
 
 fn resolve_ytdlp_binary(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
     // Try PATH first
     if which::which("yt-dlp").is_ok() {
+        println!("[DEBUG] yt-dlp found in PATH");
         return Some(PathBuf::from("yt-dlp"));
     }
 
     // Try bundled resource path using Tauri v2's correct method
     #[cfg(target_os = "windows")]
     {
-        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp.exe", BaseDirectory::Resource) {
-            if resource_path.exists() {
-                return Some(resource_path);
-            }
-        }
-        // Try x86 version as fallback
-        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp_x86.exe", BaseDirectory::Resource) {
-            if resource_path.exists() {
-                return Some(resource_path);
+        let resource_path = "resources/yt-dlp/dist/yt-dlp/yt-dlp.exe";
+        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
+            println!("[DEBUG] Trying Windows yt-dlp path: {:?}", resolved_path);
+            if resolved_path.exists() {
+                println!("[DEBUG] Windows yt-dlp found at: {:?}", resolved_path);
+                return Some(resolved_path);
             }
         }
     }
     #[cfg(target_os = "macos")]
     {
-        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp_macos", BaseDirectory::Resource) {
-            if resource_path.exists() {
-                return Some(resource_path);
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(resource_path) = app_handle.path().resolve("resources/yt-dlp/yt-dlp_macos", BaseDirectory::Resource) {
-            if resource_path.exists() {
-                return Some(resource_path);
+        let resource_path = "resources/yt-dlp/dist/yt-dlp/yt-dlp";
+        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
+            println!("[DEBUG] Trying macOS yt-dlp path: {:?}", resolved_path);
+            if resolved_path.exists() {
+                println!("[DEBUG] macOS yt-dlp found at: {:?}", resolved_path);
+                return Some(resolved_path);
             }
         }
     }
 
+    println!("[DEBUG] yt-dlp binary not found");
+    None
+}
+
+fn resolve_audio_separator_binary(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    // Try PATH first
+    if which::which("audio-separator").is_ok() {
+        println!("[DEBUG] audio-separator found in PATH");
+        return Some(PathBuf::from("audio-separator"));
+    }
+
+    // Try bundled resource path using Tauri v2's correct method
+    #[cfg(target_os = "windows")]
+    {
+        let resource_path = "resources/audio-separator/dist/audio-separator/audio-separator.exe";
+        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
+            println!("[DEBUG] Trying Windows audio-separator path: {:?}", resolved_path);
+            if resolved_path.exists() {
+                println!("[DEBUG] Windows audio-separator found at: {:?}", resolved_path);
+                return Some(resolved_path);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let resource_path = "resources/audio-separator/dist/audio-separator/audio-separator";
+        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
+            println!("[DEBUG] Trying macOS audio-separator path: {:?}", resolved_path);
+            if resolved_path.exists() {
+                println!("[DEBUG] macOS audio-separator found at: {:?}", resolved_path);
+                return Some(resolved_path);
+            }
+        }
+    }
+
+    println!("[DEBUG] audio-separator binary not found");
     None
 }
 
@@ -690,14 +670,7 @@ async fn get_local_file_info(app_handle: tauri::AppHandle, file_path: String) ->
     }
 
     // Use ffprobe to get file information
-    let ffprobe_path = {
-        let manager = get_ffmpeg_manager()
-            .ok_or("ffmpeg manager not available")?;
-        
-        manager.get_ffprobe_path()
-            .ok_or("ffprobe binary path not available")?
-            .clone()
-    };
+    let ffprobe_path = get_ffprobe_binary(&app_handle)?;
 
     let output = Command::new(ffprobe_path)
         .args(&[
@@ -846,14 +819,7 @@ async fn unified_download(
             // If Spotify, resolve to a YouTube URL first
             let mut final_input = input.clone();
             if matches!(input_type, InputType::Spotify) {
-                let yt_dlp_path = {
-                    let manager = get_ytdlp_manager()
-                        .ok_or("yt-dlp manager not available")?;
-                    
-                    manager.get_binary_path()
-                        .ok_or("yt-dlp binary path not available")?
-                        .clone()
-                };
+                let yt_dlp_path = get_ytdlp_binary(&app_handle)?;
                 
                 if let Ok(info) = handle_spotify_url(&input, &yt_dlp_path).await {
                     if let Some(yurl) = info.video_url {
@@ -863,19 +829,15 @@ async fn unified_download(
             }
 
             // Ensure ffmpeg/ffprobe are found by yt-dlp
-            let ffmpeg_path = {
-                let manager = get_ffmpeg_manager()
-                    .ok_or("ffmpeg manager not available")?;
-                
-                manager.get_ffmpeg_path()
-                    .ok_or("ffmpeg binary path not available")?
-                    .clone()
-            };
+            let ffmpeg_path = get_ffmpeg_binary(&app_handle)?;
             
-            if let Some(dir) = ffmpeg_path.parent() {
-                args.push("--ffmpeg-location".into());
-                args.push(dir.to_string_lossy().to_string());
-            }
+            // Set the full path to ffmpeg executable (yt-dlp will find ffprobe in the same directory)
+            args.push("--ffmpeg-location".into());
+            args.push(ffmpeg_path.to_string_lossy().to_string());
+            
+            // Debug logging to verify arguments are being set
+            println!("[DEBUG] Setting ffmpeg-location: {}", ffmpeg_path.to_string_lossy());
+            println!("[DEBUG] Full yt-dlp args: {:?}", args);
 
             // Progress output (will parse from stdout)
             args.push("--progress".into());
@@ -956,14 +918,7 @@ async fn unified_download(
             }
 
             // Spawn yt-dlp and stream progress
-            let yt_dlp_path = {
-                let manager = get_ytdlp_manager()
-                    .ok_or("yt-dlp manager not available")?;
-                
-                manager.get_binary_path()
-                    .ok_or("yt-dlp binary path not available")?
-                    .clone()
-            };
+            let yt_dlp_path = get_ytdlp_binary(&app_handle)?;
             let mut child = TokioCommand::new(&yt_dlp_path)
                 .args(args)
                 .stderr(std::process::Stdio::piped())
@@ -1009,19 +964,11 @@ async fn unified_download(
                 let mut retry_args: Vec<String> = Vec::new();
 
                 // ffmpeg location
-                let ffmpeg_path = {
-                    let manager = get_ffmpeg_manager()
-                        .ok_or("ffmpeg manager not available")?;
-                    
-                    manager.get_ffmpeg_path()
-                        .ok_or("ffmpeg binary path not available")?
-                        .clone()
-                };
+                let ffmpeg_path = get_ffmpeg_binary(&app_handle)?;
                 
-                if let Some(dir) = ffmpeg_path.parent() {
-                    retry_args.push("--ffmpeg-location".into());
-                    retry_args.push(dir.to_string_lossy().to_string());
-                }
+                // Set the full path to ffmpeg executable (yt-dlp will find ffprobe in the same directory)
+                retry_args.push("--ffmpeg-location".into());
+                retry_args.push(ffmpeg_path.to_string_lossy().to_string());
 
                 retry_args.push("-o".into());
                 retry_args.push("%(title)s.%(ext)s".into());
@@ -1378,21 +1325,611 @@ async fn stop_download() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn list_audio_separator_models(app_handle: tauri::AppHandle) -> Result<Vec<ModelInfo>, String> {
+    println!("[DEBUG] Starting list_audio_separator_models...");
+    
+    // Get audio-separator binary path
+    let executable_path = get_audio_separator_binary(&app_handle)?;
+    println!("[DEBUG] Executable path: {:?}", executable_path);
+    println!("[DEBUG] Executable exists: {}", executable_path.exists());
+    println!("[DEBUG] Executable is file: {}", executable_path.is_file());
+    
+    // Check executable permissions
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(&executable_path) {
+            println!("[DEBUG] Executable permissions (octal): {:o}", metadata.permissions().mode());
+        }
+    }
+    
+    // List directory contents around the executable
+    if let Some(parent) = executable_path.parent() {
+        println!("[DEBUG] Executable parent directory: {:?}", parent);
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            println!("[DEBUG] Parent directory contents:");
+            for entry in entries.flatten() {
+                println!("  - {:?}", entry.path());
+            }
+        }
+    }
+
+    // Try to run with --help first to test basic functionality
+    println!("[DEBUG] Testing executable with --help...");
+    let help_output = Command::new(&executable_path)
+        .arg("--help")
+        .output();
+    
+    match help_output {
+        Ok(help) => {
+            println!("[DEBUG] --help command successful: {}", help.status.success());
+            if !help.status.success() {
+                println!("[DEBUG] --help stderr: {}", String::from_utf8_lossy(&help.stderr));
+            }
+        }
+        Err(e) => {
+            println!("[DEBUG] --help command failed: {}", e);
+        }
+    }
+
+    // Execute audio-separator --list_models --list_format json
+    println!("[DEBUG] Executing --list_models command...");
+    let output = Command::new(executable_path)
+        .args(&["--list_models", "--list_format", "json"])
+        .output()
+        .map_err(|e| format!("Failed to execute audio-separator: {}", e))?;
+
+    println!("[DEBUG] Command completed with status: {:?}", output.status);
+    println!("[DEBUG] Command stdout length: {} bytes", output.stdout.len());
+    println!("[DEBUG] Command stderr length: {} bytes", output.stderr.len());
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        println!("[DEBUG] Command failed with stderr: {}", error_msg);
+        return Err(format!("audio-separator failed: {}", error_msg));
+    }
+
+    // Parse the JSON output - it's an object with model names as keys
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    println!("[DEBUG] Raw JSON output length: {} characters", json_str.len());
+    println!("[DEBUG] Raw JSON output (first 500 chars): {}", &json_str[..std::cmp::min(500, json_str.len())]);
+    
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("Failed to parse models JSON: {}", e))?;
+    println!("[DEBUG] JSON parsed successfully");
+
+    let mut models = Vec::new();
+    println!("[DEBUG] Starting to parse JSON structure...");
+    
+    if let Some(json_obj) = json_value.as_object() {
+        println!("[DEBUG] JSON is an object with {} top-level keys", json_obj.len());
+        println!("[DEBUG] Top-level keys: {:?}", json_obj.keys().collect::<Vec<_>>());
+        
+        for (architecture, category_data) in json_obj {
+            println!("[DEBUG] Processing architecture: {}", architecture);
+            
+            if let Some(category_obj) = category_data.as_object() {
+                println!("[DEBUG] Architecture {} has {} models", architecture, category_obj.len());
+                
+                for (model_name, model_data) in category_obj {
+                    println!("[DEBUG] Processing model: {}", model_name);
+                    
+                    if let Some(model_obj) = model_data.as_object() {
+                        if let Some(filename) = model_obj.get("filename").and_then(|v| v.as_str()) {
+                            println!("[DEBUG] Model {} has filename: {}", model_name, filename);
+                            
+                            // Extract stems from the model data - only use the "stems" field
+                            let stems = if let Some(stems_array) = model_obj.get("stems") {
+                                if let Some(stems_vec) = stems_array.as_array() {
+                                    let stems_list: Vec<&str> = stems_vec.iter()
+                                        .filter_map(|s| s.as_str())
+                                        .collect();
+                                    println!("[DEBUG] Model {} has stems: {:?}", model_name, stems_list);
+                                    stems_list.join(", ")
+    } else {
+                                    println!("[DEBUG] Model {} has stems but not as array: {:?}", model_name, stems_array);
+                                    "Unknown".to_string()
+                                }
+                            } else {
+                                println!("[DEBUG] Model {} has no stems field", model_name);
+                                "Unknown".to_string()
+                            };
+
+                            // Use the architecture from the JSON structure (VR, MDX, Demucs, MDXC)
+                            let arch = architecture.to_string();
+                            println!("[DEBUG] Model {} assigned architecture: {}", model_name, arch);
+
+                            models.push(ModelInfo {
+                                filename: filename.to_string(),
+                                arch: arch.to_string(),
+                                output_stems: stems,
+                                friendly_name: model_name.to_string(),
+                            });
+                            println!("[DEBUG] Added model {} to results", model_name);
+                        } else {
+                            println!("[DEBUG] Model {} has no filename field", model_name);
+                        }
+                    } else {
+                        println!("[DEBUG] Model {} data is not an object", model_name);
+                    }
+                }
+            } else {
+                println!("[DEBUG] Architecture {} data is not an object", architecture);
+            }
+        }
+    } else {
+        println!("[DEBUG] JSON is not an object");
+    }
+    
+    println!("[DEBUG] Parsing complete. Found {} models", models.len());
+
+    Ok(models)
+}
+
+#[tauri::command]
+async fn list_downloaded_models(app_handle: tauri::AppHandle, modelDirectory: String) -> Result<Vec<DownloadedModel>, String> {
+    let model_dir = PathBuf::from(&modelDirectory);
+    
+    if !model_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut models = Vec::new();
+    
+    if let Ok(entries) = fs::read_dir(&model_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    // Only include actual model files
+                    let is_model_file = filename.ends_with(".ckpt") || 
+                                      filename.ends_with(".pth") || 
+                                      filename.ends_with(".onnx") ||
+                                      filename.ends_with(".safetensors") ||
+                                      filename.ends_with(".bin");
+                    
+                    if is_model_file {
+                        // Create a friendly name by replacing underscores and hyphens with spaces
+                        let friendly_name = filename
+                            .replace("_", " ")
+                            .replace("-", " ")
+                            .replace(".ckpt", "")
+                            .replace(".pth", "")
+                            .replace(".onnx", "")
+                            .replace(".safetensors", "")
+                            .replace(".bin", "");
+                        
+                        models.push(DownloadedModel {
+                            filename: filename.to_string(),
+                                friendly_name,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+    Ok(models)
+}
+
+#[tauri::command]
+async fn delete_model(app_handle: tauri::AppHandle, model_filename: String, modelDirectory: String) -> Result<(), String> {
+    let model_path = PathBuf::from(&modelDirectory).join(&model_filename);
+    
+    if !model_path.exists() {
+        return Err("Model file not found".to_string());
+    }
+
+    fs::remove_file(&model_path)
+        .map_err(|e| format!("Failed to delete model: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn download_audio_separator_model(app_handle: tauri::AppHandle, model_filename: String, modelDirectory: String) -> Result<(), String> {
+    // Get audio-separator binary path
+    let executable_path = get_audio_separator_binary(&app_handle)?;
+
+    // Create model directory if it doesn't exist
+    let model_dir = PathBuf::from(&modelDirectory);
+        fs::create_dir_all(&model_dir)
+            .map_err(|e| format!("Failed to create model directory: {}", e))?;
+
+    // Get ffmpeg directory for PATH
+    let ffmpeg_dir = get_ffmpeg_binary(&app_handle)
+        .ok()
+        .and_then(|ffmpeg_path| ffmpeg_path.parent().map(|p| p.to_string_lossy().to_string()));
+
+    // Execute audio-separator --download_model_only -m <model_filename> --model_file_dir <modelDirectory>
+    let mut cmd = Command::new(executable_path);
+    cmd.args(&[
+            "--download_model_only",
+            "-m", &model_filename,
+        "--model_file_dir", &modelDirectory
+    ]);
+    
+    // Add ffmpeg to PATH if available
+    if let Some(ffmpeg_path) = ffmpeg_dir {
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = if cfg!(target_os = "windows") {
+            format!("{};{}", current_path, ffmpeg_path)
+        } else {
+            format!("{}:{}", current_path, ffmpeg_path)
+        };
+        cmd.env("PATH", new_path);
+        
+        // Also set explicit environment variables for audio-separator
+        cmd.env("FFMPEG_PATH", format!("{}/ffmpeg", ffmpeg_path));
+        cmd.env("FFPROBE_PATH", format!("{}/ffprobe", ffmpeg_path));
+    }
+
+    let output = cmd
+        .current_dir(&model_dir)
+        .output()
+        .map_err(|e| format!("Failed to execute audio-separator: {}", e))?;
+
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("audio-separator download failed: {}", error_msg));
+    }
+
+    // Verify the model was downloaded
+    let expected_model_path = model_dir.join(&model_filename);
+    if !expected_model_path.exists() {
+        return Err("Model download completed but file not found".to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_separation_models(app_handle: tauri::AppHandle) -> Result<Vec<ModelInfo>, String> {
+    // Alias for list_audio_separator_models for frontend compatibility
+    list_audio_separator_models(app_handle).await
+}
+
+#[tauri::command]
+async fn perform_audio_separation(
+    app_handle: tauri::AppHandle,
+    inputFile: String,
+    settings: SeparationSettings,
+    selectedStems: Vec<String>,
+) -> Result<SeparationResult, String> {
+    println!("[DEBUG] Starting audio separation...");
+    println!("[DEBUG] Input file: {}", inputFile);
+    println!("[DEBUG] Settings: {:?}", settings);
+    println!("[DEBUG] Selected stems: {:?}", selectedStems);
+    
+    // Check system resources before starting
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        if let Ok(output) = Command::new("top").args(["-l", "1", "-n", "0"]).output() {
+            let top_output = String::from_utf8_lossy(&output.stdout);
+            println!("[DEBUG] System resource status:");
+            for line in top_output.lines().take(10) {
+                println!("[DEBUG] {}", line);
+            }
+        }
+    }
+    
+    // Get audio-separator binary path
+    let executable_path = get_audio_separator_binary(&app_handle)?;
+    println!("[DEBUG] Using executable: {:?}", executable_path);
+
+    // Create output directory
+    let output_dir = if settings.output_dir.is_empty() {
+        let input_path = PathBuf::from(&inputFile);
+        let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+        parent.join("Separated")
+    } else {
+        PathBuf::from(&settings.output_dir)
+    };
+    
+    println!("[DEBUG] Output directory: {:?}", output_dir);
+
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    println!("[DEBUG] Output directory created successfully");
+
+    // Get ffmpeg directory for PATH
+    let ffmpeg_dir = get_ffmpeg_binary(&app_handle)
+        .ok()
+        .and_then(|ffmpeg_path| ffmpeg_path.parent().map(|p| p.to_string_lossy().to_string()));
+
+    // Build command arguments - store all strings in a vector to avoid lifetime issues
+    let mut string_args = Vec::new();
+    
+    // Add basic arguments that are common to all models
+    string_args.push(("--output_dir", output_dir.to_string_lossy().to_string()));
+
+    // Determine model type from filename and only add relevant parameters
+    let model_filename_lower = settings.model_filename.to_lowercase();
+    
+    // Add GPU acceleration if specified
+    let mut use_autocast = false;
+    if settings.use_gpu && settings.use_autocast {
+        use_autocast = true;
+    }
+    
+    // Performance optimizations for ONNX models
+    if model_filename_lower.contains(".onnx") {
+        // Enable autocast for better performance on supported hardware
+        if settings.use_gpu {
+            use_autocast = true;
+        }
+    }
+    
+    // For ONNX models, use minimal parameters to avoid conflicts and improve performance
+    if model_filename_lower.contains(".onnx") {
+        // Only add essential parameters for ONNX models
+        string_args.push(("--sample_rate", settings.sample_rate.to_string()));
+        string_args.push(("--normalization", settings.normalization.to_string()));
+        string_args.push(("--amplification", settings.amplification.to_string()));
+        
+        // Add single stem if specified
+        if let Some(single_stem) = &settings.single_stem {
+            string_args.push(("--single_stem", single_stem.clone()));
+        }
+        
+        // Add model file directory if specified
+        if !settings.model_file_dir.is_empty() {
+            string_args.push(("--model_file_dir", settings.model_file_dir.clone()));
+        }
+        
+        // Skip all architecture-specific parameters for ONNX models
+    } else if model_filename_lower.contains(".ckpt") || model_filename_lower.contains(".pth") {
+        // MDX model - add MDX-specific parameters
+        string_args.push(("--mdx_segment_size", settings.mdx_segment_size.to_string()));
+        string_args.push(("--mdx_overlap", settings.mdx_overlap.to_string()));
+        string_args.push(("--mdx_batch_size", settings.mdx_batch_size.to_string()));
+        
+        if settings.mdx_enable_denoise {
+            string_args.push(("--mdx_enable_denoise", "".to_string())); // Boolean flag, no value
+        }
+    } else if model_filename_lower.contains("vr") || model_filename_lower.contains("vocal") {
+        // VR model - add VR-specific parameters
+        string_args.push(("--vr_batch_size", settings.vr_batch_size.to_string()));
+        string_args.push(("--vr_window_size", settings.vr_window_size.to_string()));
+        string_args.push(("--vr_aggression", settings.vr_aggression.to_string()));
+        
+        if settings.vr_enable_tta {
+            string_args.push(("--vr_enable_tta", "".to_string())); // Boolean flag, no value
+        }
+        if settings.vr_high_end_process {
+            string_args.push(("--vr_high_end_process", "".to_string())); // Boolean flag, no value
+        }
+        if settings.vr_enable_post_process {
+            string_args.push(("--vr_enable_post_process", "".to_string())); // Boolean flag, no value
+            string_args.push(("--vr_post_process_threshold", settings.vr_post_process_threshold.to_string()));
+        }
+    } else if model_filename_lower.contains("demucs") {
+        // Demucs model - add Demucs-specific parameters
+        string_args.push(("--demucs_segment_size", settings.demucs_segment_size.clone()));
+        string_args.push(("--demucs_shifts", settings.demucs_shifts.to_string()));
+        string_args.push(("--demucs_overlap", settings.demucs_overlap.to_string()));
+        
+        if !settings.demucs_segments_enabled {
+            string_args.push(("--demucs_segments_enabled", "false".to_string()));
+        }
+    } else if model_filename_lower.contains("mdxc") {
+        // MDXC model - add MDXC-specific parameters
+        string_args.push(("--mdxc_segment_size", settings.mdxc_segment_size.to_string()));
+        string_args.push(("--mdxc_overlap", settings.mdxc_overlap.to_string()));
+        string_args.push(("--mdxc_batch_size", settings.mdxc_batch_size.to_string()));
+        string_args.push(("--mdxc_pitch_shift", settings.mdxc_pitch_shift.to_string()));
+        
+        if settings.mdxc_override_model_segment_size {
+            string_args.push(("--mdxc_override_model_segment_size", "".to_string())); // Boolean flag, no value
+        }
+    }
+
+    // Debug: Print all collected string arguments
+    println!("[DEBUG] Collected string arguments:");
+    for (i, (arg_name, arg_value)) in string_args.iter().enumerate() {
+        println!("[DEBUG]   [{}] {} = '{}' (len: {})", i, arg_name, arg_value, arg_value.len());
+    }
+
+    // Build the final args vector - be very careful about argument formatting
+    let mut args = Vec::new();
+    
+    // Add model argument
+    args.push("-m");
+    args.push(&settings.model_filename);
+    
+    // Add all the string arguments with validation
+    for (arg_name, arg_value) in &string_args {
+        // Clean and validate argument name
+        let clean_arg_name = arg_name.trim();
+        if clean_arg_name.is_empty() {
+            println!("[DEBUG] Skipping empty argument name");
+            continue;
+        }
+        
+        // Clean and validate argument value
+        let clean_arg_value = arg_value.trim();
+        
+        // Additional validation: check for hidden characters or problematic values
+        if clean_arg_value.contains('\0') || clean_arg_value.contains('\r') || clean_arg_value.contains('\n') {
+            println!("[DEBUG] Skipping argument '{}' with problematic value: '{}'", clean_arg_name, clean_arg_value);
+            continue;
+        }
+        
+        // Handle boolean flags (empty values) vs regular arguments
+        if clean_arg_value.is_empty() {
+            // This is a boolean flag - add it without a value
+            args.push(clean_arg_name);
+            println!("[DEBUG] Added boolean flag: {}", clean_arg_name);
+        } else {
+            // This is a regular argument with a value
+            args.push(clean_arg_name);
+            args.push(clean_arg_value);
+            println!("[DEBUG] Added argument: {} = {}", clean_arg_name, clean_arg_value);
+        }
+    }
+    
+    // Add GPU acceleration if specified
+    if use_autocast {
+        args.push("--use_autocast");
+        println!("[DEBUG] Added GPU acceleration: --use_autocast");
+    }
+
+    // Add input file - validate the path
+    let clean_input_file = inputFile.trim();
+    if clean_input_file.is_empty() {
+        return Err("Input file path is empty".to_string());
+    }
+    
+    // Check for problematic characters in input file path
+    if clean_input_file.contains('\0') || clean_input_file.contains('\r') || clean_input_file.contains('\n') {
+        return Err(format!("Input file path contains problematic characters: '{}'", clean_input_file));
+    }
+    
+    args.push(clean_input_file);
+    println!("[DEBUG] Added input file: '{}' (len: {})", clean_input_file, clean_input_file.len());
+
+    // Execute audio-separator
+    println!("[DEBUG] Final command arguments: {:?}", args);
+    println!("[DEBUG] Working directory: {:?}", output_dir);
+    
+    let mut cmd = Command::new(&executable_path);
+    cmd.args(&args);
+    
+    // Debug: Print the exact command being executed
+    println!("[DEBUG] Executable path: {:?}", executable_path);
+    println!("[DEBUG] Command args: {:?}", args);
+    println!("[DEBUG] Full command: {} {}", executable_path.display(), args.join(" "));
+    
+    // Add ffmpeg to PATH if available
+    if let Some(ffmpeg_path) = ffmpeg_dir {
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = if cfg!(target_os = "windows") {
+            format!("{};{}", current_path, ffmpeg_path)
+        } else {
+            format!("{}:{}", current_path, ffmpeg_path)
+        };
+        cmd.env("PATH", &new_path);
+        println!("[DEBUG] Set PATH to include FFmpeg: {}", new_path);
+        
+        // Also set explicit environment variables for audio-separator
+        cmd.env("FFMPEG_PATH", format!("{}/ffmpeg", ffmpeg_path));
+        cmd.env("FFPROBE_PATH", format!("{}/ffprobe", ffmpeg_path));
+        println!("[DEBUG] Set FFMPEG_PATH: {}/ffmpeg", ffmpeg_path);
+        println!("[DEBUG] Set FFPROBE_PATH: {}/ffprobe", ffmpeg_path);
+    }
+
+    println!("[DEBUG] Starting audio-separator process...");
+    println!("[DEBUG] This may take a while. Monitoring progress...");
+    
+    let output = cmd
+        .current_dir(&output_dir)
+        .output()
+        .map_err(|e| format!("Failed to execute audio-separator: {}", e))?;
+
+    println!("[DEBUG] Process completed with status: {:?}", output.status);
+    println!("[DEBUG] STDOUT length: {} bytes", output.stdout.len());
+    println!("[DEBUG] STDERR length: {} bytes", output.stderr.len());
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        println!("[DEBUG] Process failed with stderr: {}", error_msg);
+        return Err(format!("Audio separation failed: {}", error_msg));
+    }
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("[DEBUG] Process stdout: {}", stdout);
+
+    // Find output files
+    println!("[DEBUG] Searching for output files in: {:?}", output_dir);
+    let mut output_files = Vec::new();
+    if let Ok(entries) = fs::read_dir(&output_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "wav" || ext == "mp3" || ext == "flac" {
+                        output_files.push(path.to_string_lossy().to_string());
+                        println!("[DEBUG] Found output file: {:?}", path);
+                    }
+                }
+            }
+        }
+    }
+    
+    println!("[DEBUG] Total output files found: {}", output_files.len());
+
+    Ok(SeparationResult {
+        success: true,
+        message: "Audio separation completed successfully".to_string(),
+        output_files,
+    })
+}
+
+#[tauri::command]
+async fn detect_gpu_capabilities() -> Result<GPUInfo, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if std::env::consts::ARCH == "aarch64" {
+            return Ok(GPUInfo {
+                gpu_type: "mps".to_string(),
+                is_available: true,
+                description: "Apple Metal Performance Shaders (MPS) - Best for Apple Silicon Macs".to_string(),
+            });
+        }
+        return Ok(GPUInfo {
+            gpu_type: "cpu".to_string(),
+            is_available: false,
+            description: "CPU processing - Intel Mac fallback".to_string(),
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Check for CUDA
+        if let Ok(output) = Command::new("nvidia-smi").output() {
+            if output.status.success() {
+                return Ok(GPUInfo {
+                    gpu_type: "cuda".to_string(),
+                    is_available: true,
+                    description: "NVIDIA CUDA GPU acceleration available".to_string(),
+                });
+            }
+        }
+        return Ok(GPUInfo {
+            gpu_type: "cpu".to_string(),
+            is_available: false,
+            description: "CPU processing - Windows fallback".to_string(),
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Check for CUDA
+        if let Ok(output) = Command::new("nvidia-smi").output() {
+    if output.status.success() {
+                return Ok(GPUInfo {
+                    gpu_type: "cpu".to_string(),
+                    is_available: false,
+                    description: "CPU processing - Linux fallback".to_string(),
+                });
+            }
+        }
+        return Ok(GPUInfo {
+            gpu_type: "cpu".to_string(),
+            is_available: false,
+            description: "CPU processing - Linux fallback".to_string(),
+        });
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
                             .setup(|app| {
-                        // Initialize yt-dlp manager when the app starts
-                        if let Err(e) = init_ytdlp_manager(&app.app_handle()) {
-                            eprintln!("Failed to initialize yt-dlp manager: {}", e);
-                        }
-                        
-                        // Initialize ffmpeg manager when the app starts
-                        if let Err(e) = init_ffmpeg_manager(&app.app_handle()) {
-                            eprintln!("Failed to initialize ffmpeg manager: {}", e);
-                        }
-                        
+                        // No initialization needed - binaries are resolved on-demand
                         Ok(())
                     })
         .invoke_handler(tauri::generate_handler![
@@ -1408,10 +1945,18 @@ pub fn run() {
             open_in_explorer,
             stop_download,
             copy_audio_file_to_clipboard,
-            delete_file
+            delete_file,
+            list_audio_separator_models,
+            list_downloaded_models,
+            list_separation_models,
+            download_audio_separator_model,
+            delete_model,
+            perform_audio_separation,
+            detect_gpu_capabilities
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
 
 
