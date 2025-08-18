@@ -82,10 +82,11 @@ interface Settings {
   max_downloads_per_automatic_subtitles: number;
   max_downloads_per_manual_subtitles: number;
 
-  // Stem separation settings
+  // Stem separation settings (simplified - only output format for now)
   separation_settings: {
-    model_filename: string;
     output_format: string;
+    // Other fields are disabled for now to simplify the interface
+    model_filename: string;
     output_dir: string;
     model_file_dir: string;
     normalization: number;
@@ -124,7 +125,7 @@ interface Settings {
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
-  download_path: "Documents/Resample", // This will be set properly by the backend
+  download_path: "Documents/Resample2", // This will be set properly by the backend
   audio_format: "mp3",
   audio_quality: "0",
   video_format: "mp4",
@@ -190,7 +191,7 @@ const DEFAULT_SETTINGS: Settings = {
     mdxc_batch_size: 1,
     mdxc_pitch_shift: 0,
   },
-  model_directory: "Documents/Resample/Models",
+  model_directory: "Documents/Resample2/Models",
   enable_stem_extraction: false,
 };
 
@@ -663,6 +664,14 @@ export function SettingsPage({
         {/* Stem Separation Settings Tab */}
         {activeTab === "Stem Separation" && (
           <div className="space-y-6">
+            {/* Note: Most fields are disabled for now to simplify the interface */}
+            <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+              <p className="text-blue-800 dark:text-blue-200 text-sm">
+                <strong>Note:</strong> Settings disabled for now, will be
+                re-enabled in a future update.
+              </p>
+            </div>
+
             {/* Basic Configuration */}
             <Card>
               <CardHeader>
@@ -698,8 +707,8 @@ export function SettingsPage({
                   </Select>
                 </div>
 
-                {/* Audio Processing Settings */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Audio Processing Settings - DISABLED FOR NOW */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 opacity-50">
                   <div>
                     <InfoTooltip title="Max peak amplitude to normalize input and output audio to. Example: --normalization=0.7">
                       <label className="block mb-2 font-semibold">
@@ -718,6 +727,7 @@ export function SettingsPage({
                           normalization: parseFloat(e.target.value) || 0.0,
                         })
                       }
+                      disabled
                     />
                   </div>
 
@@ -739,6 +749,7 @@ export function SettingsPage({
                           amplification: parseFloat(e.target.value) || 0.0,
                         })
                       }
+                      disabled
                     />
                   </div>
 
@@ -756,6 +767,7 @@ export function SettingsPage({
                           sample_rate: parseInt(val) || 44100,
                         })
                       }
+                      disabled
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -783,8 +795,8 @@ export function SettingsPage({
                   </div>
                 </div>
 
-                {/* Advanced Options */}
-                <div className="flex items-center space-x-3">
+                {/* Advanced Options - DISABLED FOR NOW */}
+                <div className="flex items-center space-x-3 opacity-50">
                   <Checkbox
                     id="useAutocast"
                     checked={settings.separation_settings.use_autocast}
@@ -794,6 +806,7 @@ export function SettingsPage({
                         use_autocast: checked as boolean,
                       })
                     }
+                    disabled
                   />
                   <InfoTooltip title="Use PyTorch autocast for faster inference. Do not use for CPU inference. Example: --use_autocast">
                     <label htmlFor="useAutocast" className="text-sm">
@@ -802,11 +815,11 @@ export function SettingsPage({
                   </InfoTooltip>
                 </div>
 
-                {/* MDX Architecture Settings */}
-                <div>
+                {/* MDX Architecture Settings - DISABLED FOR NOW */}
+                <div className="opacity-50">
                   <InfoTooltip title="MDX Architecture Parameters - Larger consumes more resources, but may give better results">
                     <label className="block mb-3 font-semibold">
-                      MDX Architecture Settings
+                      MDX Architecture Settings (Disabled)
                     </label>
                   </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -825,6 +838,7 @@ export function SettingsPage({
                             mdx_segment_size: parseInt(e.target.value) || 256,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -844,6 +858,7 @@ export function SettingsPage({
                             mdx_overlap: parseFloat(e.target.value) || 0.25,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -860,6 +875,7 @@ export function SettingsPage({
                             mdx_batch_size: parseInt(e.target.value) || 1,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -875,6 +891,7 @@ export function SettingsPage({
                             mdx_enable_denoise: checked as boolean,
                           })
                         }
+                        disabled
                       />
                       <InfoTooltip title="Enable denoising during separation. Example: --mdx_enable_denoise">
                         <label htmlFor="mdxEnableDenoise" className="text-sm">
@@ -885,11 +902,11 @@ export function SettingsPage({
                   </div>
                 </div>
 
-                {/* VR Architecture Settings */}
-                <div>
+                {/* VR Architecture Settings - DISABLED FOR NOW */}
+                <div className="opacity-50">
                   <InfoTooltip title="VR Architecture Parameters - Balance quality and speed for vocal separation">
                     <label className="block mb-3 font-semibold">
-                      VR Architecture Settings
+                      VR Architecture Settings (Disabled)
                     </label>
                   </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -906,6 +923,7 @@ export function SettingsPage({
                             vr_batch_size: parseInt(e.target.value) || 1,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -924,6 +942,7 @@ export function SettingsPage({
                             vr_window_size: parseInt(e.target.value) || 512,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -940,6 +959,7 @@ export function SettingsPage({
                             vr_aggression: parseInt(e.target.value) || 5,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -964,6 +984,7 @@ export function SettingsPage({
                               parseFloat(e.target.value) || 0.2,
                           })
                         }
+                        disabled
                       />
                     </div>
                   </div>
@@ -979,6 +1000,7 @@ export function SettingsPage({
                             vr_enable_tta: checked as boolean,
                           })
                         }
+                        disabled
                       />
                       <InfoTooltip title="Enable Test-Time-Augmentation; slow but improves quality. Example: --vr_enable_tta">
                         <label htmlFor="vrEnableTta" className="text-sm">
@@ -999,6 +1021,7 @@ export function SettingsPage({
                             vr_high_end_process: checked as boolean,
                           })
                         }
+                        disabled
                       />
                       <InfoTooltip title="Mirror the missing frequency range of the output. Example: --vr_high_end_process">
                         <label htmlFor="vrHighEndProcess" className="text-sm">
@@ -1019,6 +1042,7 @@ export function SettingsPage({
                             vr_enable_post_process: checked as boolean,
                           })
                         }
+                        disabled
                       />
                       <InfoTooltip title="Identify leftover artifacts within vocal output; may improve separation for some songs. Example: --vr_enable_post_process">
                         <label
@@ -1032,11 +1056,11 @@ export function SettingsPage({
                   </div>
                 </div>
 
-                {/* Demucs Architecture Settings */}
-                <div>
+                {/* Demucs Architecture Settings - DISABLED FOR NOW */}
+                <div className="opacity-50">
                   <InfoTooltip title="Demucs Architecture Parameters - High-quality separation with segment-wise processing">
                     <label className="block mb-3 font-semibold">
-                      Demucs Architecture Settings
+                      Demucs Architecture Settings (Disabled)
                     </label>
                   </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1054,6 +1078,7 @@ export function SettingsPage({
                             demucs_segment_size: e.target.value,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -1070,6 +1095,7 @@ export function SettingsPage({
                             demucs_shifts: parseInt(e.target.value) || 2,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -1089,6 +1115,7 @@ export function SettingsPage({
                             demucs_overlap: parseFloat(e.target.value) || 0.25,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -1104,6 +1131,7 @@ export function SettingsPage({
                             demucs_segments_enabled: checked as boolean,
                           })
                         }
+                        disabled
                       />
                       <InfoTooltip title="Enable segment-wise processing. Example: --demucs_segments_enabled=True">
                         <label
@@ -1117,11 +1145,11 @@ export function SettingsPage({
                   </div>
                 </div>
 
-                {/* MDXC Architecture Settings */}
-                <div>
+                {/* MDXC Architecture Settings - DISABLED FOR NOW */}
+                <div className="opacity-50">
                   <InfoTooltip title="MDXC Architecture Parameters - Advanced separation with pitch shifting capabilities">
                     <label className="block mb-3 font-semibold">
-                      MDXC Architecture Settings
+                      MDXC Architecture Settings (Disabled)
                     </label>
                   </InfoTooltip>
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -1140,6 +1168,7 @@ export function SettingsPage({
                             mdxc_segment_size: parseInt(e.target.value) || 256,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -1159,6 +1188,7 @@ export function SettingsPage({
                             mdxc_overlap: parseFloat(e.target.value) || 8,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -1175,6 +1205,7 @@ export function SettingsPage({
                             mdxc_batch_size: parseInt(e.target.value) || 1,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -1186,7 +1217,7 @@ export function SettingsPage({
                       </InfoTooltip>
                       <Input
                         type="number"
-                        step="0.1"
+                        step="1"
                         value={settings.separation_settings.mdxc_pitch_shift}
                         onChange={(e) =>
                           updateSetting("separation_settings", {
@@ -1194,6 +1225,7 @@ export function SettingsPage({
                             mdxc_pitch_shift: parseFloat(e.target.value) || 0,
                           })
                         }
+                        disabled
                       />
                     </div>
 
@@ -1211,6 +1243,7 @@ export function SettingsPage({
                               checked as boolean,
                           })
                         }
+                        disabled
                       />
                       <InfoTooltip title="Override model default segment size instead of using the model default value. Example: --mdxc_override_model_segment_size">
                         <label

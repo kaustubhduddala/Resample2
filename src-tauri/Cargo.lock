@@ -3,6 +3,23 @@
 version = 4
 
 [[package]]
+name = "Resample2"
+version = "0.0.1-alpha.1"
+dependencies = [
+ "chrono",
+ "dirs 5.0.1",
+ "reqwest",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "which",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3358,23 +3375,6 @@ dependencies = [
  "wasm-streams",
  "web-sys",
  "webpki-roots",
-]
-
-[[package]]
-name = "resample"
-version = "0.0.1-alpha.1"
-dependencies = [
- "chrono",
- "dirs 5.0.1",
- "reqwest",
- "rfd",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
- "which",
 ]
 
 [[package]]

@@ -216,7 +216,7 @@ function App() {
   // Remove the Download Center state variables since it's now in Settings
   const [settings, setSettings] = useState<Settings>({
     theme: "system",
-    download_path: "Documents/Resample",
+    download_path: "Documents/2",
     audio_format: "mp3",
     audio_quality: "0",
     video_format: "mp4",
@@ -282,7 +282,7 @@ function App() {
       mdxc_batch_size: 1,
       mdxc_pitch_shift: 0,
     },
-    model_directory: "Documents/Resample/Models",
+    model_directory: "Documents//Models",
     enable_stem_extraction: false,
   });
 
@@ -1989,7 +1989,7 @@ function App() {
                     />
                     <div className="text-left text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                       <div className="font-medium">
-                        Resample by{" "}
+                        by{" "}
                         <a
                           href="https://kaustubh.duddala.com"
                           target="_blank"

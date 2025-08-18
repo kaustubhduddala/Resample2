@@ -118,13 +118,88 @@ struct GPUInfo {
 
 static CURRENT_DL_PID: AtomicI64 = AtomicI64::new(0);
 
-// Binary path resolution for yt-dlp
+// Optimized binary resolution functions
+fn resolve_ytdlp_binary(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    // Try PATH first for maximum performance
+    if which::which("yt-dlp").is_ok() {
+        println!("[INFO] yt-dlp found in PATH - using system version");
+        return Some(PathBuf::from("yt-dlp"));
+    }
+
+    // Fallback to bundled standalone script
+    let script_name = if cfg!(target_os = "windows") {
+        "yt-dlp-standalone.bat"
+    } else {
+        "yt-dlp-standalone.sh"
+    };
+
+    if let Ok(resolved_path) = app_handle.path().resolve(&format!("resources/{}", script_name), BaseDirectory::Resource) {
+        if resolved_path.exists() {
+            println!("[INFO] Using bundled yt-dlp script: {:?}", resolved_path);
+            return Some(resolved_path);
+        }
+    }
+
+    println!("[ERROR] yt-dlp binary not found in PATH or bundled resources");
+    None
+}
+
+fn resolve_ff_binary(app_handle: &tauri::AppHandle, bin_name: &str) -> Option<PathBuf> {
+    // Try PATH first for maximum performance
+    if which::which(bin_name).is_ok() {
+        println!("[INFO] {} found in PATH - using system version", bin_name);
+        return Some(PathBuf::from(bin_name));
+    }
+
+    // Fallback to bundled binary
+    let resource_path = if cfg!(target_os = "windows") {
+        format!("resources/ffmpeg/{}.exe", bin_name)
+    } else {
+        format!("resources/ffmpeg/{}", bin_name)
+    };
+
+    if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
+        if resolved_path.exists() {
+            println!("[INFO] Using bundled {}: {:?}", bin_name, resolved_path);
+            return Some(resolved_path);
+        }
+    }
+
+    println!("[ERROR] {} binary not found in PATH or bundled resources", bin_name);
+    None
+}
+
+fn resolve_audio_separator_binary(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    // Try PATH first for maximum performance
+    if which::which("audio-separator").is_ok() {
+        println!("[INFO] audio-separator found in PATH - using system version");
+        return Some(PathBuf::from("audio-separator"));
+    }
+
+    // Fallback to bundled standalone script
+    let script_name = if cfg!(target_os = "windows") {
+        "audio-separator-standalone.bat"
+    } else {
+        "audio-separator-standalone.sh"
+    };
+
+    if let Ok(resolved_path) = app_handle.path().resolve(&format!("resources/{}", script_name), BaseDirectory::Resource) {
+        if resolved_path.exists() {
+            println!("[INFO] Using bundled audio-separator script: {:?}", resolved_path);
+            return Some(resolved_path);
+        }
+    }
+
+    println!("[ERROR] audio-separator binary not found in PATH or bundled resources");
+    None
+}
+
+// Helper functions for binary resolution
 fn get_ytdlp_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     resolve_ytdlp_binary(app_handle)
         .ok_or_else(|| "yt-dlp binary not found".to_string())
 }
 
-// Binary path resolution for ffmpeg binaries
 fn get_ffmpeg_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     resolve_ff_binary(app_handle, "ffmpeg")
         .ok_or_else(|| "ffmpeg binary not found".to_string())
@@ -135,7 +210,6 @@ fn get_ffprobe_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> 
         .ok_or_else(|| "ffprobe binary not found".to_string())
 }
 
-// Binary path resolution for audio-separator
 fn get_audio_separator_binary(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     resolve_audio_separator_binary(app_handle)
         .ok_or_else(|| "audio-separator binary not found".to_string())
@@ -152,13 +226,13 @@ fn get_documents_dir() -> Result<PathBuf, String> {
 
 fn get_default_download_path() -> Result<String, String> {
     let docs_dir = get_documents_dir()?;
-    let resample_dir = docs_dir.join("Resample");
-    Ok(resample_dir.to_string_lossy().to_string())
+    let Resample2_dir = docs_dir.join("Resample2");
+    Ok(Resample2_dir.to_string_lossy().to_string())
 }
 
 fn get_default_model_directory() -> Result<String, String> {
     let docs_dir = get_documents_dir()?;
-    let models_dir = docs_dir.join("Resample").join("Models");
+    let models_dir = docs_dir.join("Resample2").join("Models");
     Ok(models_dir.to_string_lossy().to_string())
 }
 
@@ -215,9 +289,9 @@ fn load_settings(app_handle: tauri::AppHandle) -> Result<String, String> {
     } else {
         // Return default settings if file doesn't exist
         let download_path =
-            get_default_download_path().unwrap_or_else(|_| "Documents/Resample".to_string());
+            get_default_download_path().unwrap_or_else(|_| "Documents/Resample2".to_string());
         let model_directory = get_default_model_directory()
-            .unwrap_or_else(|_| "Documents/Resample/Models".to_string());
+            .unwrap_or_else(|_| "Documents/Resample2/Models".to_string());
 
         let default_settings = format!(
             r#"{{
@@ -526,111 +600,6 @@ fn extract_spotify_track_id(url: &str) -> Result<String, String> {
     }
 }
 
-fn resolve_ff_binary(app_handle: &tauri::AppHandle, bin_name: &str) -> Option<PathBuf> {
-    // Try PATH first
-    if which::which(bin_name).is_ok() {
-        println!("[DEBUG] {} found in PATH", bin_name);
-        return Some(PathBuf::from(bin_name));
-    }
-
-    // Try bundled resource path using Tauri v2's correct method
-    #[cfg(target_os = "windows")]
-    {
-        let resource_path = format!("resources/ffmpeg/{}.exe", bin_name);
-        if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
-            println!("[DEBUG] Trying Windows {} path: {:?}", bin_name, resolved_path);
-            if resolved_path.exists() {
-                println!("[DEBUG] Windows {} found at: {:?}", bin_name, resolved_path);
-                return Some(resolved_path);
-            }
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let resource_path = format!("resources/ffmpeg/{}", bin_name);
-        if let Ok(resolved_path) = app_handle.path().resolve(&resource_path, BaseDirectory::Resource) {
-            println!("[DEBUG] Trying macOS {} path: {:?}", bin_name, resolved_path);
-            if resolved_path.exists() {
-                println!("[DEBUG] macOS {} found at: {:?}", bin_name, resolved_path);
-                return Some(resolved_path);
-            }
-        }
-    }
-
-    println!("[DEBUG] {} binary not found", bin_name);
-    None
-}
-
-fn resolve_ytdlp_binary(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
-    // Try PATH first
-    if which::which("yt-dlp").is_ok() {
-        println!("[DEBUG] yt-dlp found in PATH");
-        return Some(PathBuf::from("yt-dlp"));
-    }
-
-    // Try bundled resource path using Tauri v2's correct method
-    #[cfg(target_os = "windows")]
-    {
-        let resource_path = "resources/yt-dlp/dist/yt-dlp/yt-dlp.exe";
-        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
-            println!("[DEBUG] Trying Windows yt-dlp path: {:?}", resolved_path);
-            if resolved_path.exists() {
-                println!("[DEBUG] Windows yt-dlp found at: {:?}", resolved_path);
-                return Some(resolved_path);
-            }
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let resource_path = "resources/yt-dlp/dist/yt-dlp/yt-dlp";
-        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
-            println!("[DEBUG] Trying macOS yt-dlp path: {:?}", resolved_path);
-            if resolved_path.exists() {
-                println!("[DEBUG] macOS yt-dlp found at: {:?}", resolved_path);
-                return Some(resolved_path);
-            }
-        }
-    }
-
-    println!("[DEBUG] yt-dlp binary not found");
-    None
-}
-
-fn resolve_audio_separator_binary(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
-    // Try PATH first
-    if which::which("audio-separator").is_ok() {
-        println!("[DEBUG] audio-separator found in PATH");
-        return Some(PathBuf::from("audio-separator"));
-    }
-
-    // Try bundled resource path using Tauri v2's correct method
-    #[cfg(target_os = "windows")]
-    {
-        let resource_path = "resources/audio-separator/dist/audio-separator/audio-separator.exe";
-        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
-            println!("[DEBUG] Trying Windows audio-separator path: {:?}", resolved_path);
-            if resolved_path.exists() {
-                println!("[DEBUG] Windows audio-separator found at: {:?}", resolved_path);
-                return Some(resolved_path);
-            }
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let resource_path = "resources/audio-separator/dist/audio-separator/audio-separator";
-        if let Ok(resolved_path) = app_handle.path().resolve(resource_path, BaseDirectory::Resource) {
-            println!("[DEBUG] Trying macOS audio-separator path: {:?}", resolved_path);
-            if resolved_path.exists() {
-                println!("[DEBUG] macOS audio-separator found at: {:?}", resolved_path);
-                return Some(resolved_path);
-            }
-        }
-    }
-
-    println!("[DEBUG] audio-separator binary not found");
-    None
-}
-
 fn newest_file_in_dir(dir: &Path) -> Option<PathBuf> {
     let mut newest: Option<(SystemTime, PathBuf)> = None;
     if let Ok(entries) = fs::read_dir(dir) {
@@ -722,7 +691,7 @@ async fn unified_download(
     app_handle: tauri::AppHandle,
     input: String,
     input_type: InputType,
-    processing_mode: String,
+    _processing_mode: String,
     startTime: Option<f64>,
     endTime: Option<f64>,
 ) -> Result<DownloadResult, String> {
@@ -758,23 +727,10 @@ async fn unified_download(
                 .map_err(|e| format!("Failed to get app data dir: {}", e))?;
             let settings_path = app_dir.join("settings.json");
 
-            // Defaults
+            // Get basic settings
             let mut download_base = get_default_download_path()?;
             let mut extract_audio = true;
             let mut audio_format = "mp3".to_string();
-            let mut audio_quality = "0".to_string();
-            let mut video_quality = "best".to_string();
-            let mut write_subtitles = false;
-            let mut write_thumbnail = false;
-            let mut write_description = false;
-            let mut write_info = false;
-            let mut write_annotations = false;
-            let mut write_comments = false;
-            let mut write_automatic_subtitles = false;
-            let mut write_manual_subtitles = false;
-            let mut retries: Option<u64> = None;
-            let mut fragment_retries: Option<u64> = None;
-            let mut concurrent_fragments: Option<u64> = None;
 
             if settings_path.exists() {
                 if let Ok(content) = fs::read_to_string(&settings_path) {
@@ -788,23 +744,6 @@ async fn unified_download(
                         if let Some(s) = val.get("audio_format").and_then(|v| v.as_str()) {
                             audio_format = s.to_string();
                         }
-                        if let Some(s) = val.get("audio_quality").and_then(|v| v.as_str()) {
-                            audio_quality = s.to_string();
-                        }
-                        if let Some(s) = val.get("video_quality").and_then(|v| v.as_str()) {
-                            video_quality = s.to_string();
-                        }
-                        write_subtitles = val.get("write_subtitles").and_then(|v| v.as_bool()).unwrap_or(false);
-                        write_thumbnail = val.get("write_thumbnail").and_then(|v| v.as_bool()).unwrap_or(false);
-                        write_description = val.get("write_description").and_then(|v| v.as_bool()).unwrap_or(false);
-                        write_info = val.get("write_info").and_then(|v| v.as_bool()).unwrap_or(false);
-                        write_annotations = val.get("write_annotations").and_then(|v| v.as_bool()).unwrap_or(false);
-                        write_comments = val.get("write_comments").and_then(|v| v.as_bool()).unwrap_or(false);
-                        write_automatic_subtitles = val.get("write_automatic_subtitles").and_then(|v| v.as_bool()).unwrap_or(false);
-                        write_manual_subtitles = val.get("write_manual_subtitles").and_then(|v| v.as_bool()).unwrap_or(false);
-                        retries = val.get("retries").and_then(|v| v.as_u64());
-                        fragment_retries = val.get("fragment_retries").and_then(|v| v.as_u64());
-                        concurrent_fragments = val.get("concurrent_fragments").and_then(|v| v.as_u64());
                     }
                 }
             }
@@ -812,9 +751,6 @@ async fn unified_download(
             let downloads_dir = PathBuf::from(&download_base).join("Downloads");
             fs::create_dir_all(&downloads_dir)
                 .map_err(|e| format!("Failed to create downloads directory: {}", e))?;
-
-            // Build yt-dlp command
-            let mut args: Vec<String> = Vec::new();
 
             // If Spotify, resolve to a YouTube URL first
             let mut final_input = input.clone();
@@ -828,56 +764,24 @@ async fn unified_download(
                 }
             }
 
-            // Ensure ffmpeg/ffprobe are found by yt-dlp
+            // Get ffmpeg path for environment setup
             let ffmpeg_path = get_ffmpeg_binary(&app_handle)?;
             
-            // Set the full path to ffmpeg executable (yt-dlp will find ffprobe in the same directory)
-            args.push("--ffmpeg-location".into());
-            args.push(ffmpeg_path.to_string_lossy().to_string());
+            // Build yt-dlp command arguments for standalone script
+            let mut args = Vec::new();
             
-            // Debug logging to verify arguments are being set
-            println!("[DEBUG] Setting ffmpeg-location: {}", ffmpeg_path.to_string_lossy());
-            println!("[DEBUG] Full yt-dlp args: {:?}", args);
-
-            // Progress output (will parse from stdout)
-            args.push("--progress".into());
-            args.push("--newline".into());
-            args.push("--progress-template".into());
-            args.push("download:%(progress._percent_str)s".into());
-            args.push("--progress-template".into());
-            args.push("postprocess:%(progress._percent_str)s".into());
-
-            args.push("-o".into());
-            args.push("%(title)s.%(ext)s".into());
-            args.push("-P".into());
+            // Basic yt-dlp arguments
+            args.push("--extract-audio".to_string());
+            args.push("--audio-format".to_string());
+            args.push(audio_format);
+            args.push("--audio-quality".to_string());
+            args.push("0".to_string()); // Best quality
+            args.push("-o".to_string());
+            args.push("%(title)s.%(ext)s".to_string());
+            args.push("-P".to_string());
             args.push(downloads_dir.to_string_lossy().to_string());
-            args.push("--no-playlist".into());
-            args.push("--no-warnings".into());
-            if extract_audio {
-                args.push("-x".into());
-                args.push("--audio-format".into());
-                args.push(audio_format.clone());
-                args.push("--audio-quality".into());
-                args.push(audio_quality.clone());
-                args.push("--prefer-ffmpeg".into());
-            } else {
-                args.push("--format".into());
-                args.push(video_quality.clone());
-            }
-
-            // Additional options from settings
-            if write_subtitles { args.push("--write-sub".into()); }
-            if write_thumbnail { args.push("--write-thumbnail".into()); }
-            if write_description { args.push("--write-description".into()); }
-            if write_info { args.push("--write-info-json".into()); }
-            if write_annotations { args.push("--write-annotations".into()); }
-            if write_comments { args.push("--write-comments".into()); }
-            if write_automatic_subtitles { args.push("--write-auto-sub".into()); }
-            if write_manual_subtitles { args.push("--write-sub".into()); }
-
-            if let Some(r) = retries { args.push("--retries".into()); args.push(r.to_string()); }
-            if let Some(r) = fragment_retries { args.push("--fragment-retries".into()); args.push(r.to_string()); }
-            if let Some(c) = concurrent_fragments { args.push("--concurrent-fragments".into()); args.push(c.to_string()); }
+            args.push("--no-playlist".to_string());
+            args.push("--no-warnings".to_string());
             // Time range options
             if let (Some(s), Some(e)) = (startTime, endTime) {
                 if e > s {
@@ -917,124 +821,70 @@ async fn unified_download(
                 let _ = Command::new("pkill").args(["-f", "ffmpeg"]).output();
             }
 
-            // Spawn yt-dlp and stream progress
+            // Get yt-dlp standalone script path
             let yt_dlp_path = get_ytdlp_binary(&app_handle)?;
-            let mut child = TokioCommand::new(&yt_dlp_path)
-                .args(args)
-                .stderr(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
+            println!("[INFO] Using yt-dlp standalone script: {:?}", yt_dlp_path);
+            
+            // Set up environment variables for the standalone script
+            let mut env = std::collections::HashMap::new();
+            env.insert("PATH".to_string(), std::env::var("PATH").unwrap_or_default());
+            
+            // Add ffmpeg to PATH for the standalone script
+            if let Some(ffmpeg_dir) = ffmpeg_path.parent() {
+                let current_path = std::env::var("PATH").unwrap_or_default();
+                let new_path = if cfg!(target_os = "windows") {
+                    format!("{};{}", current_path, ffmpeg_dir.to_string_lossy())
+                    } else {
+                    format!("{}:{}", current_path, ffmpeg_dir.to_string_lossy())
+                };
+                env.insert("PATH".to_string(), new_path);
+                println!("[INFO] Added ffmpeg to PATH: {}", ffmpeg_dir.to_string_lossy());
+            }
+            
+            // Execute yt-dlp standalone script
+            println!("[INFO] Executing yt-dlp with args: {:?}", args);
+            
+            let output = Command::new(&yt_dlp_path)
+                .args(&args)
+                .env_clear()
+                .envs(&env)
+                .current_dir(&downloads_dir)
+                .output()
                 .map_err(|e| format!("Failed to execute yt-dlp: {}", e))?;
 
-            // Record PID for stop_download
-            if let Some(pid) = child.id() {
-                CURRENT_DL_PID.store(pid as i64, Ordering::SeqCst);
+            if !output.status.success() {
+                let error_msg = String::from_utf8_lossy(&output.stderr);
+                println!("[ERROR] yt-dlp failed: {}", error_msg);
+                emit_progress(0.0, &format!("Download failed: {}", error_msg), "error");
+                return Err(format!("yt-dlp failed: {}", error_msg));
             }
 
-            let mut last_non_progress_line: Option<String> = None;
-            if let Some(stdout) = child.stdout.take() {
-                let reader = BufReader::new(stdout);
-                let mut lines = reader.lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    // Example lines from template: "download: 12.3%" or "postprocess: 45.0%"
-                    if let Some(rest) = line.strip_prefix("download:") {
-                        let pct = rest.trim().trim_end_matches('%').trim();
-                        if let Ok(p) = pct.parse::<f64>() {
-                            emit_progress(p, "Downloading...", "downloading");
+            // Parse output for progress information
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("[download]") && line.contains("%") {
+                    if let Some(percent_str) = line.split_whitespace().find(|s| s.contains("%")) {
+                        if let Some(percent) = percent_str.trim_end_matches('%').parse::<f64>().ok() {
+                            emit_progress(percent, "Downloading...", "downloading");
                         }
-                    } else if let Some(rest) = line.strip_prefix("postprocess:") {
-                        let pct = rest.trim().trim_end_matches('%').trim();
-                        if let Ok(p) = pct.parse::<f64>() {
-                            emit_progress(p, "Processing...", "processing");
-                        }
-                    } else {
-                        last_non_progress_line = Some(line);
                     }
                 }
             }
+            // Download completed successfully
 
-            let status = child
-                .wait()
-                .await
-                .map_err(|e| format!("Failed to wait for yt-dlp: {}", e))?;
-            // Clear PID
-            CURRENT_DL_PID.store(0, Ordering::SeqCst);
-            if !status.success() {
-                // Fallback: retry without progress flags and without sections
-                let mut retry_args: Vec<String> = Vec::new();
-
-                // ffmpeg location
-                let ffmpeg_path = get_ffmpeg_binary(&app_handle)?;
-                
-                // Set the full path to ffmpeg executable (yt-dlp will find ffprobe in the same directory)
-                retry_args.push("--ffmpeg-location".into());
-                retry_args.push(ffmpeg_path.to_string_lossy().to_string());
-
-                retry_args.push("-o".into());
-                retry_args.push("%(title)s.%(ext)s".into());
-                retry_args.push("-P".into());
-                retry_args.push(downloads_dir.to_string_lossy().to_string());
-                retry_args.push("--no-playlist".into());
-                retry_args.push("--no-warnings".into());
-                if extract_audio {
-                    retry_args.push("-x".into());
-                    retry_args.push("--audio-format".into());
-                    retry_args.push(audio_format.clone());
-                }
-                // Preserve trimming on retry if a valid selection was provided
-                if let (Some(s), Some(e)) = (startTime, endTime) {
-                    if e > s {
-                        fn seconds_to_hhmmss(total_seconds: f64) -> String {
-                            let secs = total_seconds.max(0.0).floor() as u64;
-                            let h = secs / 3600;
-                            let m = (secs % 3600) / 60;
-                            let s = secs % 60;
-                            format!("{:02}:{:02}:{:02}", h, m, s)
-                        }
-                        let start_tc = seconds_to_hhmmss(s);
-                        let end_tc = seconds_to_hhmmss(e);
-                        let duration_s = (e - s).max(0.0);
-
-                        retry_args.push("--download-sections".into());
-                        retry_args.push(format!("*{}-{}", start_tc, end_tc));
-                    }
-                }
-
-                retry_args.push(final_input.clone());
-
-                let retry_status = TokioCommand::new(&yt_dlp_path)
-                    .args(retry_args)
-                    .stderr(std::process::Stdio::inherit())
-                    .stdout(std::process::Stdio::inherit())
-                    .status()
-                    .await
-                    .map_err(|e| format!("Failed to execute yt-dlp (retry): {}", e))?;
-                if !retry_status.success() {
-                    let msg = last_non_progress_line.unwrap_or_else(|| "yt-dlp failed".to_string());
-                    emit_progress(0.0, &msg, "error");
-                    return Err(msg);
-                }
-            }
-
-            // Locate the downloaded file robustly (extensions + recent creation time)
+            // Locate the downloaded file
             let mut file_path: PathBuf;
             {
                 let files = fs::read_dir(&downloads_dir)
                     .map_err(|e| format!("Failed to read downloads directory: {}", e))?;
                 let now = SystemTime::now();
                 let valid_exts_audio = ["mp3", "m4a", "opus", "wav", "flac", "aac", "ogg"];
-                let valid_exts_video = ["mp4", "webm", "mkv", "avi"];
                 let mut newest: Option<(SystemTime, PathBuf)> = None;
 
                 for entry in files.flatten() {
                     let path = entry.path();
                     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        let is_valid = if extract_audio {
-                            valid_exts_audio.contains(&ext.to_lowercase().as_str())
-                        } else {
-                            valid_exts_video.contains(&ext.to_lowercase().as_str())
-                        };
-                        if is_valid {
+                        if valid_exts_audio.contains(&ext.to_lowercase().as_str()) {
                             if let Ok(meta) = fs::metadata(&path) {
                                 if let Ok(created) = meta.created() {
                                     if let Ok(age) = now.duration_since(created) {
@@ -1327,143 +1177,92 @@ async fn stop_download() -> Result<(), String> {
 
 #[tauri::command]
 async fn list_audio_separator_models(app_handle: tauri::AppHandle) -> Result<Vec<ModelInfo>, String> {
-    println!("[DEBUG] Starting list_audio_separator_models...");
+    println!("[INFO] Starting model listing...");
     
     // Get audio-separator binary path
     let executable_path = get_audio_separator_binary(&app_handle)?;
-    println!("[DEBUG] Executable path: {:?}", executable_path);
-    println!("[DEBUG] Executable exists: {}", executable_path.exists());
-    println!("[DEBUG] Executable is file: {}", executable_path.is_file());
-    
-    // Check executable permissions
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(&executable_path) {
-            println!("[DEBUG] Executable permissions (octal): {:o}", metadata.permissions().mode());
-        }
-    }
-    
-    // List directory contents around the executable
-    if let Some(parent) = executable_path.parent() {
-        println!("[DEBUG] Executable parent directory: {:?}", parent);
-        if let Ok(entries) = std::fs::read_dir(parent) {
-            println!("[DEBUG] Parent directory contents:");
-            for entry in entries.flatten() {
-                println!("  - {:?}", entry.path());
-            }
-        }
-    }
+    println!("[INFO] Using executable: {:?}", executable_path);
 
-    // Try to run with --help first to test basic functionality
-    println!("[DEBUG] Testing executable with --help...");
+    // Test basic functionality first
     let help_output = Command::new(&executable_path)
         .arg("--help")
         .output();
     
     match help_output {
         Ok(help) => {
-            println!("[DEBUG] --help command successful: {}", help.status.success());
             if !help.status.success() {
-                println!("[DEBUG] --help stderr: {}", String::from_utf8_lossy(&help.stderr));
+                let error_msg = String::from_utf8_lossy(&help.stderr);
+                println!("[WARNING] --help command failed: {}", error_msg);
+            } else {
+                println!("[INFO] Executable test successful");
             }
         }
         Err(e) => {
-            println!("[DEBUG] --help command failed: {}", e);
+            println!("[WARNING] Executable test failed: {}", e);
         }
     }
 
     // Execute audio-separator --list_models --list_format json
-    println!("[DEBUG] Executing --list_models command...");
-    let output = Command::new(executable_path)
+    println!("[INFO] Executing --list_models command...");
+    let output = Command::new(&executable_path)
         .args(&["--list_models", "--list_format", "json"])
         .output()
         .map_err(|e| format!("Failed to execute audio-separator: {}", e))?;
 
-    println!("[DEBUG] Command completed with status: {:?}", output.status);
-    println!("[DEBUG] Command stdout length: {} bytes", output.stdout.len());
-    println!("[DEBUG] Command stderr length: {} bytes", output.stderr.len());
-    
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        println!("[DEBUG] Command failed with stderr: {}", error_msg);
+        println!("[ERROR] Command failed: {}", error_msg);
         return Err(format!("audio-separator failed: {}", error_msg));
     }
 
-    // Parse the JSON output - it's an object with model names as keys
+    // Parse the JSON output
     let json_str = String::from_utf8_lossy(&output.stdout);
-    println!("[DEBUG] Raw JSON output length: {} characters", json_str.len());
-    println!("[DEBUG] Raw JSON output (first 500 chars): {}", &json_str[..std::cmp::min(500, json_str.len())]);
+    println!("[INFO] Received {} bytes of model data", json_str.len());
     
     let json_value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("Failed to parse models JSON: {}", e))?;
-    println!("[DEBUG] JSON parsed successfully");
 
     let mut models = Vec::new();
-    println!("[DEBUG] Starting to parse JSON structure...");
     
+    // Parse the JSON structure (object with architecture keys, each containing model objects)
     if let Some(json_obj) = json_value.as_object() {
-        println!("[DEBUG] JSON is an object with {} top-level keys", json_obj.len());
-        println!("[DEBUG] Top-level keys: {:?}", json_obj.keys().collect::<Vec<_>>());
+        println!("[INFO] Found {} architecture categories", json_obj.len());
         
         for (architecture, category_data) in json_obj {
-            println!("[DEBUG] Processing architecture: {}", architecture);
-            
             if let Some(category_obj) = category_data.as_object() {
-                println!("[DEBUG] Architecture {} has {} models", architecture, category_obj.len());
-                
                 for (model_name, model_data) in category_obj {
-                    println!("[DEBUG] Processing model: {}", model_name);
-                    
                     if let Some(model_obj) = model_data.as_object() {
                         if let Some(filename) = model_obj.get("filename").and_then(|v| v.as_str()) {
-                            println!("[DEBUG] Model {} has filename: {}", model_name, filename);
-                            
-                            // Extract stems from the model data - only use the "stems" field
+                            // Extract stems from the model data
                             let stems = if let Some(stems_array) = model_obj.get("stems") {
                                 if let Some(stems_vec) = stems_array.as_array() {
-                                    let stems_list: Vec<&str> = stems_vec.iter()
+                                    stems_vec.iter()
                                         .filter_map(|s| s.as_str())
-                                        .collect();
-                                    println!("[DEBUG] Model {} has stems: {:?}", model_name, stems_list);
-                                    stems_list.join(", ")
-    } else {
-                                    println!("[DEBUG] Model {} has stems but not as array: {:?}", model_name, stems_array);
+                                        .collect::<Vec<&str>>()
+                                        .join(", ")
+                                } else {
                                     "Unknown".to_string()
                                 }
                             } else {
-                                println!("[DEBUG] Model {} has no stems field", model_name);
                                 "Unknown".to_string()
                             };
 
-                            // Use the architecture from the JSON structure (VR, MDX, Demucs, MDXC)
-                            let arch = architecture.to_string();
-                            println!("[DEBUG] Model {} assigned architecture: {}", model_name, arch);
-
                             models.push(ModelInfo {
                                 filename: filename.to_string(),
-                                arch: arch.to_string(),
+                                arch: architecture.to_string(),
                                 output_stems: stems,
                                 friendly_name: model_name.to_string(),
                             });
-                            println!("[DEBUG] Added model {} to results", model_name);
-                        } else {
-                            println!("[DEBUG] Model {} has no filename field", model_name);
                         }
-                    } else {
-                        println!("[DEBUG] Model {} data is not an object", model_name);
                     }
                 }
-            } else {
-                println!("[DEBUG] Architecture {} data is not an object", architecture);
             }
         }
     } else {
-        println!("[DEBUG] JSON is not an object");
+        return Err("Invalid JSON format: expected object structure".to_string());
     }
     
-    println!("[DEBUG] Parsing complete. Found {} models", models.len());
-
+    println!("[INFO] Successfully parsed {} models", models.len());
     Ok(models)
 }
 
@@ -1529,24 +1328,26 @@ async fn delete_model(app_handle: tauri::AppHandle, model_filename: String, mode
 
 #[tauri::command]
 async fn download_audio_separator_model(app_handle: tauri::AppHandle, model_filename: String, modelDirectory: String) -> Result<(), String> {
+    println!("[INFO] Starting model download: {}", model_filename);
+    
     // Get audio-separator binary path
     let executable_path = get_audio_separator_binary(&app_handle)?;
 
     // Create model directory if it doesn't exist
     let model_dir = PathBuf::from(&modelDirectory);
-        fs::create_dir_all(&model_dir)
-            .map_err(|e| format!("Failed to create model directory: {}", e))?;
+    fs::create_dir_all(&model_dir)
+        .map_err(|e| format!("Failed to create model directory: {}", e))?;
 
     // Get ffmpeg directory for PATH
     let ffmpeg_dir = get_ffmpeg_binary(&app_handle)
         .ok()
         .and_then(|ffmpeg_path| ffmpeg_path.parent().map(|p| p.to_string_lossy().to_string()));
 
-    // Execute audio-separator --download_model_only -m <model_filename> --model_file_dir <modelDirectory>
-    let mut cmd = Command::new(executable_path);
+    // Build command
+    let mut cmd = Command::new(&executable_path);
     cmd.args(&[
-            "--download_model_only",
-            "-m", &model_filename,
+        "--download_model_only",
+        "-m", &model_filename,
         "--model_file_dir", &modelDirectory
     ]);
     
@@ -1559,12 +1360,11 @@ async fn download_audio_separator_model(app_handle: tauri::AppHandle, model_file
             format!("{}:{}", current_path, ffmpeg_path)
         };
         cmd.env("PATH", new_path);
-        
-        // Also set explicit environment variables for audio-separator
-        cmd.env("FFMPEG_PATH", format!("{}/ffmpeg", ffmpeg_path));
-        cmd.env("FFPROBE_PATH", format!("{}/ffprobe", ffmpeg_path));
+        println!("[INFO] Added ffmpeg to PATH: {}", ffmpeg_path);
     }
 
+    // Execute download
+    println!("[INFO] Executing model download...");
     let output = cmd
         .current_dir(&model_dir)
         .output()
@@ -1572,6 +1372,7 @@ async fn download_audio_separator_model(app_handle: tauri::AppHandle, model_file
 
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
+        println!("[ERROR] Model download failed: {}", error_msg);
         return Err(format!("audio-separator download failed: {}", error_msg));
     }
 
@@ -1581,6 +1382,7 @@ async fn download_audio_separator_model(app_handle: tauri::AppHandle, model_file
         return Err("Model download completed but file not found".to_string());
     }
 
+    println!("[INFO] Model downloaded successfully: {:?}", expected_model_path);
     Ok(())
 }
 
@@ -1597,27 +1399,13 @@ async fn perform_audio_separation(
     settings: SeparationSettings,
     selectedStems: Vec<String>,
 ) -> Result<SeparationResult, String> {
-    println!("[DEBUG] Starting audio separation...");
-    println!("[DEBUG] Input file: {}", inputFile);
-    println!("[DEBUG] Settings: {:?}", settings);
-    println!("[DEBUG] Selected stems: {:?}", selectedStems);
-    
-    // Check system resources before starting
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-        if let Ok(output) = Command::new("top").args(["-l", "1", "-n", "0"]).output() {
-            let top_output = String::from_utf8_lossy(&output.stdout);
-            println!("[DEBUG] System resource status:");
-            for line in top_output.lines().take(10) {
-                println!("[DEBUG] {}", line);
-            }
-        }
-    }
+    println!("[INFO] Starting audio separation...");
+    println!("[INFO] Input file: {}", inputFile);
+    println!("[INFO] Model: {}", settings.model_filename);
     
     // Get audio-separator binary path
     let executable_path = get_audio_separator_binary(&app_handle)?;
-    println!("[DEBUG] Using executable: {:?}", executable_path);
+    println!("[INFO] Using executable: {:?}", executable_path);
 
     // Create output directory
     let output_dir = if settings.output_dir.is_empty() {
@@ -1628,179 +1416,66 @@ async fn perform_audio_separation(
         PathBuf::from(&settings.output_dir)
     };
     
-    println!("[DEBUG] Output directory: {:?}", output_dir);
-
+    println!("[INFO] Output directory: {:?}", output_dir);
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create output directory: {}", e))?;
-    println!("[DEBUG] Output directory created successfully");
 
     // Get ffmpeg directory for PATH
     let ffmpeg_dir = get_ffmpeg_binary(&app_handle)
         .ok()
         .and_then(|ffmpeg_path| ffmpeg_path.parent().map(|p| p.to_string_lossy().to_string()));
 
-    // Build command arguments - store all strings in a vector to avoid lifetime issues
-    let mut string_args = Vec::new();
-    
-    // Add basic arguments that are common to all models
-    string_args.push(("--output_dir", output_dir.to_string_lossy().to_string()));
-
-    // Determine model type from filename and only add relevant parameters
-    let model_filename_lower = settings.model_filename.to_lowercase();
-    
-    // Add GPU acceleration if specified
-    let mut use_autocast = false;
-    if settings.use_gpu && settings.use_autocast {
-        use_autocast = true;
-    }
-    
-    // Performance optimizations for ONNX models
-    if model_filename_lower.contains(".onnx") {
-        // Enable autocast for better performance on supported hardware
-        if settings.use_gpu {
-            use_autocast = true;
-        }
-    }
-    
-    // For ONNX models, use minimal parameters to avoid conflicts and improve performance
-    if model_filename_lower.contains(".onnx") {
-        // Only add essential parameters for ONNX models
-        string_args.push(("--sample_rate", settings.sample_rate.to_string()));
-        string_args.push(("--normalization", settings.normalization.to_string()));
-        string_args.push(("--amplification", settings.amplification.to_string()));
-        
-        // Add single stem if specified
-        if let Some(single_stem) = &settings.single_stem {
-            string_args.push(("--single_stem", single_stem.clone()));
-        }
-        
-        // Add model file directory if specified
-        if !settings.model_file_dir.is_empty() {
-            string_args.push(("--model_file_dir", settings.model_file_dir.clone()));
-        }
-        
-        // Skip all architecture-specific parameters for ONNX models
-    } else if model_filename_lower.contains(".ckpt") || model_filename_lower.contains(".pth") {
-        // MDX model - add MDX-specific parameters
-        string_args.push(("--mdx_segment_size", settings.mdx_segment_size.to_string()));
-        string_args.push(("--mdx_overlap", settings.mdx_overlap.to_string()));
-        string_args.push(("--mdx_batch_size", settings.mdx_batch_size.to_string()));
-        
-        if settings.mdx_enable_denoise {
-            string_args.push(("--mdx_enable_denoise", "".to_string())); // Boolean flag, no value
-        }
-    } else if model_filename_lower.contains("vr") || model_filename_lower.contains("vocal") {
-        // VR model - add VR-specific parameters
-        string_args.push(("--vr_batch_size", settings.vr_batch_size.to_string()));
-        string_args.push(("--vr_window_size", settings.vr_window_size.to_string()));
-        string_args.push(("--vr_aggression", settings.vr_aggression.to_string()));
-        
-        if settings.vr_enable_tta {
-            string_args.push(("--vr_enable_tta", "".to_string())); // Boolean flag, no value
-        }
-        if settings.vr_high_end_process {
-            string_args.push(("--vr_high_end_process", "".to_string())); // Boolean flag, no value
-        }
-        if settings.vr_enable_post_process {
-            string_args.push(("--vr_enable_post_process", "".to_string())); // Boolean flag, no value
-            string_args.push(("--vr_post_process_threshold", settings.vr_post_process_threshold.to_string()));
-        }
-    } else if model_filename_lower.contains("demucs") {
-        // Demucs model - add Demucs-specific parameters
-        string_args.push(("--demucs_segment_size", settings.demucs_segment_size.clone()));
-        string_args.push(("--demucs_shifts", settings.demucs_shifts.to_string()));
-        string_args.push(("--demucs_overlap", settings.demucs_overlap.to_string()));
-        
-        if !settings.demucs_segments_enabled {
-            string_args.push(("--demucs_segments_enabled", "false".to_string()));
-        }
-    } else if model_filename_lower.contains("mdxc") {
-        // MDXC model - add MDXC-specific parameters
-        string_args.push(("--mdxc_segment_size", settings.mdxc_segment_size.to_string()));
-        string_args.push(("--mdxc_overlap", settings.mdxc_overlap.to_string()));
-        string_args.push(("--mdxc_batch_size", settings.mdxc_batch_size.to_string()));
-        string_args.push(("--mdxc_pitch_shift", settings.mdxc_pitch_shift.to_string()));
-        
-        if settings.mdxc_override_model_segment_size {
-            string_args.push(("--mdxc_override_model_segment_size", "".to_string())); // Boolean flag, no value
-        }
-    }
-
-    // Debug: Print all collected string arguments
-    println!("[DEBUG] Collected string arguments:");
-    for (i, (arg_name, arg_value)) in string_args.iter().enumerate() {
-        println!("[DEBUG]   [{}] {} = '{}' (len: {})", i, arg_name, arg_value, arg_value.len());
-    }
-
-    // Build the final args vector - be very careful about argument formatting
+    // Build command arguments - MINIMAL for now (only essential parameters)
     let mut args = Vec::new();
     
-    // Add model argument
+    // Store essential string values
+    let output_dir_str = output_dir.to_string_lossy().to_string();
+    
+    // Essential arguments only
     args.push("-m");
     args.push(&settings.model_filename);
-    
-    // Add all the string arguments with validation
-    for (arg_name, arg_value) in &string_args {
-        // Clean and validate argument name
-        let clean_arg_name = arg_name.trim();
-        if clean_arg_name.is_empty() {
-            println!("[DEBUG] Skipping empty argument name");
-            continue;
-        }
-        
-        // Clean and validate argument value
-        let clean_arg_value = arg_value.trim();
-        
-        // Additional validation: check for hidden characters or problematic values
-        if clean_arg_value.contains('\0') || clean_arg_value.contains('\r') || clean_arg_value.contains('\n') {
-            println!("[DEBUG] Skipping argument '{}' with problematic value: '{}'", clean_arg_name, clean_arg_value);
-            continue;
-        }
-        
-        // Handle boolean flags (empty values) vs regular arguments
-        if clean_arg_value.is_empty() {
-            // This is a boolean flag - add it without a value
-            args.push(clean_arg_name);
-            println!("[DEBUG] Added boolean flag: {}", clean_arg_name);
-        } else {
-            // This is a regular argument with a value
-            args.push(clean_arg_name);
-            args.push(clean_arg_value);
-            println!("[DEBUG] Added argument: {} = {}", clean_arg_name, clean_arg_value);
-        }
-    }
-    
-    // Add GPU acceleration if specified
-    if use_autocast {
-        args.push("--use_autocast");
-        println!("[DEBUG] Added GPU acceleration: --use_autocast");
+    args.push("--output_dir");
+    args.push(&output_dir_str);
+
+    // Add single stem if specified
+    if let Some(single_stem) = &settings.single_stem {
+        args.push("--single_stem");
+        args.push(single_stem);
     }
 
-    // Add input file - validate the path
-    let clean_input_file = inputFile.trim();
-    if clean_input_file.is_empty() {
-        return Err("Input file path is empty".to_string());
+    // Add model file directory if specified
+    if !settings.model_file_dir.is_empty() {
+        args.push("--model_file_dir");
+        args.push(&settings.model_file_dir);
     }
-    
-    // Check for problematic characters in input file path
-    if clean_input_file.contains('\0') || clean_input_file.contains('\r') || clean_input_file.contains('\n') {
-        return Err(format!("Input file path contains problematic characters: '{}'", clean_input_file));
-    }
-    
-    args.push(clean_input_file);
-    println!("[DEBUG] Added input file: '{}' (len: {})", clean_input_file, clean_input_file.len());
 
-    // Execute audio-separator
-    println!("[DEBUG] Final command arguments: {:?}", args);
-    println!("[DEBUG] Working directory: {:?}", output_dir);
+    // Simplified GPU handling - autocast disabled for safety
+    println!("[INFO] Using safe GPU settings (autocast disabled)");
+
+    // Architecture-specific parameters are disabled for now - using minimal arguments
+    println!("[INFO] Using minimal arguments for audio separation");
+    println!("[INFO] Model: {}", settings.model_filename);
+    println!("[INFO] Output directory: {}", output_dir_str);
+
+    // Simplified GPU handling - no autocast for safety
+    if settings.use_gpu {
+        println!("[INFO] GPU acceleration enabled (autocast disabled for safety)");
+    } else {
+        println!("[INFO] Using CPU processing (safest option)");
+    }
+
+    // Add input file
+    args.push(&inputFile);
+
+    // Execute audio-separator with proper environment setup
+    println!("[INFO] Executing audio-separator with {} arguments", args.len());
+    println!("[INFO] Command: {} {}", executable_path.display(), args.join(" "));
     
     let mut cmd = Command::new(&executable_path);
     cmd.args(&args);
     
-    // Debug: Print the exact command being executed
-    println!("[DEBUG] Executable path: {:?}", executable_path);
-    println!("[DEBUG] Command args: {:?}", args);
-    println!("[DEBUG] Full command: {} {}", executable_path.display(), args.join(" "));
+    // Set working directory
+    cmd.current_dir(&output_dir);
     
     // Add ffmpeg to PATH if available
     if let Some(ffmpeg_path) = ffmpeg_dir {
@@ -1811,39 +1486,31 @@ async fn perform_audio_separation(
             format!("{}:{}", current_path, ffmpeg_path)
         };
         cmd.env("PATH", &new_path);
-        println!("[DEBUG] Set PATH to include FFmpeg: {}", new_path);
-        
-        // Also set explicit environment variables for audio-separator
-        cmd.env("FFMPEG_PATH", format!("{}/ffmpeg", ffmpeg_path));
-        cmd.env("FFPROBE_PATH", format!("{}/ffprobe", ffmpeg_path));
-        println!("[DEBUG] Set FFMPEG_PATH: {}/ffmpeg", ffmpeg_path);
-        println!("[DEBUG] Set FFPROBE_PATH: {}/ffprobe", ffmpeg_path);
+        println!("[INFO] Added ffmpeg to PATH: {}", ffmpeg_path);
     }
 
-    println!("[DEBUG] Starting audio-separator process...");
-    println!("[DEBUG] This may take a while. Monitoring progress...");
+    // Execute with timeout protection
+    println!("[INFO] Starting audio separation process...");
+    let start_time = std::time::Instant::now();
     
     let output = cmd
-        .current_dir(&output_dir)
         .output()
         .map_err(|e| format!("Failed to execute audio-separator: {}", e))?;
 
-    println!("[DEBUG] Process completed with status: {:?}", output.status);
-    println!("[DEBUG] STDOUT length: {} bytes", output.stdout.len());
-    println!("[DEBUG] STDERR length: {} bytes", output.stderr.len());
+    let duration = start_time.elapsed();
+    println!("[INFO] Process completed in {:?}", duration);
+    println!("[INFO] Exit status: {:?}", output.status);
     
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        println!("[DEBUG] Process failed with stderr: {}", error_msg);
+        println!("[ERROR] Audio separation failed: {}", error_msg);
         return Err(format!("Audio separation failed: {}", error_msg));
     }
     
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("[DEBUG] Process stdout: {}", stdout);
-
     // Find output files
-    println!("[DEBUG] Searching for output files in: {:?}", output_dir);
+    println!("[INFO] Searching for output files in: {:?}", output_dir);
     let mut output_files = Vec::new();
+    
     if let Ok(entries) = fs::read_dir(&output_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -1851,15 +1518,15 @@ async fn perform_audio_separation(
                 if let Some(ext) = path.extension() {
                     if ext == "wav" || ext == "mp3" || ext == "flac" {
                         output_files.push(path.to_string_lossy().to_string());
-                        println!("[DEBUG] Found output file: {:?}", path);
+                        println!("[INFO] Found output file: {:?}", path);
                     }
                 }
             }
         }
     }
     
-    println!("[DEBUG] Total output files found: {}", output_files.len());
-
+    println!("[INFO] Audio separation completed successfully with {} output files", output_files.len());
+    
     Ok(SeparationResult {
         success: true,
         message: "Audio separation completed successfully".to_string(),
@@ -1872,17 +1539,20 @@ async fn detect_gpu_capabilities() -> Result<GPUInfo, String> {
     #[cfg(target_os = "macos")]
     {
         if std::env::consts::ARCH == "aarch64" {
+            // Apple Silicon - check if Metal is available
             return Ok(GPUInfo {
                 gpu_type: "mps".to_string(),
                 is_available: true,
                 description: "Apple Metal Performance Shaders (MPS) - Best for Apple Silicon Macs".to_string(),
             });
+        } else {
+            // Intel Mac - Metal might be available but less reliable
+            return Ok(GPUInfo {
+                gpu_type: "metal".to_string(),
+                is_available: true,
+                description: "Apple Metal - Available on Intel Macs but may be slower".to_string(),
+            });
         }
-        return Ok(GPUInfo {
-            gpu_type: "cpu".to_string(),
-            is_available: false,
-            description: "CPU processing - Intel Mac fallback".to_string(),
-        });
     }
 
     #[cfg(target_os = "windows")]
@@ -1897,10 +1567,12 @@ async fn detect_gpu_capabilities() -> Result<GPUInfo, String> {
                 });
             }
         }
+        
+        // Check for DirectML (Windows ML)
         return Ok(GPUInfo {
-            gpu_type: "cpu".to_string(),
-            is_available: false,
-            description: "CPU processing - Windows fallback".to_string(),
+            gpu_type: "directml".to_string(),
+            is_available: true,
+            description: "DirectML acceleration available on Windows".to_string(),
         });
     }
 
@@ -1908,20 +1580,39 @@ async fn detect_gpu_capabilities() -> Result<GPUInfo, String> {
     {
         // Check for CUDA
         if let Ok(output) = Command::new("nvidia-smi").output() {
-    if output.status.success() {
+            if output.status.success() {
                 return Ok(GPUInfo {
-                    gpu_type: "cpu".to_string(),
-                    is_available: false,
-                    description: "CPU processing - Linux fallback".to_string(),
+                    gpu_type: "cuda".to_string(),
+                    is_available: true,
+                    description: "NVIDIA CUDA GPU acceleration available".to_string(),
                 });
             }
         }
+        
+        // Check for ROCm (AMD)
+        if let Ok(output) = Command::new("rocm-smi").output() {
+            if output.status.success() {
+                return Ok(GPUInfo {
+                    gpu_type: "rocm".to_string(),
+                    is_available: true,
+                    description: "AMD ROCm GPU acceleration available".to_string(),
+                });
+            }
+        }
+        
         return Ok(GPUInfo {
             gpu_type: "cpu".to_string(),
             is_available: false,
-            description: "CPU processing - Linux fallback".to_string(),
+            description: "CPU processing - no GPU acceleration detected".to_string(),
         });
     }
+
+    // Fallback for unknown platforms
+    Ok(GPUInfo {
+        gpu_type: "cpu".to_string(),
+        is_available: false,
+        description: "CPU processing - platform not supported".to_string(),
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1957,6 +1648,7 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
 
 
 

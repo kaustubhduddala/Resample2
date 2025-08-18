@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "resample",
+  "productName": "Resample2",
   "version": "0.0.1-alpha.1",
-  "identifier": "com.resample.app",
+  "identifier": "com.Resample2.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Resample",
+        "title": "Resample2",
         "width": 1150,
         "height": 1005,
         "resizable": false,
@@ -43,8 +43,11 @@
       "resources/ffmpeg/ffprobe": "resources/ffmpeg/ffprobe",
       "resources/ffmpeg/ffmpeg.exe": "resources/ffmpeg/ffmpeg.exe",
       "resources/ffmpeg/ffprobe.exe": "resources/ffmpeg/ffprobe.exe",
-      "resources/yt-dlp/dist/yt-dlp": "resources/yt-dlp/dist/yt-dlp",
-      "resources/audio-separator/dist/audio-separator": "resources/audio-separator/dist/audio-separator"
+      "resources/yt-dlp-standalone.sh": "resources/yt-dlp-standalone.sh",
+      "resources/yt-dlp-standalone.bat": "resources/yt-dlp-standalone.bat",
+      "resources/audio-separator-standalone.sh": "resources/audio-separator-standalone.sh",
+      "resources/audio-separator-standalone.bat": "resources/audio-separator-standalone.bat",
+      "resources/.venv/": "resources/.venv/"
     }
   }
 } 

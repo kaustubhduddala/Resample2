@@ -1,0 +1,44 @@
+# Audio Separator Dependencies
+audio-separator
+
+torch
+onnx
+onnxruntime
+numpy
+librosa
+requests
+six
+tqdm
+pydub
+
+
+# yt-dlp Dependencies
+yt-dlp[default,curl-cffi]>=2023.12.30
+
+# Core networking dependencies (for yt-dlp)
+requests>=2.28.0
+urllib3>=1.26.0
+websockets>=11.0.0
+certifi>=2023.7.22
+charset-normalizer>=3.0.0
+idna>=3.4
+
+# Optional but recommended dependencies (for yt-dlp)
+brotli>=1.0.9
+brotlicffi>=0.1.0
+
+# Impersonation support (for yt-dlp)
+curl-cffi>=0.5.0
+
+# Metadata support (for yt-dlp)
+mutagen>=1.45.0
+
+# Cryptography support (for yt-dlp)
+pycryptodomex>=3.15.0
+
+# Browser cookie support (for yt-dlp)
+secretstorage>=3.3.0
+
+# Additional utilities (for yt-dlp)
+xattr>=0.10.1
+

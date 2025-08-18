@@ -1,0 +1,289 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g., v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  setup-python:
+    runs-on: ubuntu-latest
+    outputs:
+      python-version: ${{ steps.python-version.outputs.python-version }}
+    steps:
+      - name: Get Python version from setup scripts
+        id: python-version
+        run: |
+          # Extract Python version requirement from setup scripts
+          MAC_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.sh | head -1 | grep -o '3\.[0-9]\+')
+          WIN_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.bat | head -1 | grep -o '3\.[0-9]\+')
+
+          # Use the higher version if they differ
+          if [[ "$MAC_VERSION" > "$WIN_VERSION" ]]; then
+            echo "python-version=$MAC_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "python-version=$WIN_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Using Python version: ${{ steps.python-version.outputs.python-version }}"
+
+  build-macos:
+    needs: setup-python
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_DIR=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_DIR }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ needs.setup-python.outputs.python-version }}
+
+      - name: Build Python environment for macOS
+        run: |
+          cd src-tauri/resources
+          chmod +x setup.sh
+          ./setup.sh
+
+      - name: Build Tauri app for macOS
+        run: |
+          cd src-tauri
+          cargo build --release --target ${{ matrix.target }}
+          pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Create DMG for macOS
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          cd src-tauri/target/aarch64-apple-darwin/release
+          # Create DMG using create-dmg or similar tool
+          # For now, we'll zip the app bundle
+          zip -r resample-macos-arm64.zip Resample2.app
+
+      - name: Create ZIP for macOS Intel
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          cd src-tauri/target/x86_64-apple-darwin/release
+          zip -r resample-macos-x64.zip Resample2.app
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/*.zip
+            src-tauri/target/${{ matrix.target }}/release/*.app
+
+  build-windows:
+    needs: setup-python
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-msvc]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_DIR=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_DIR }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ needs.setup-python.outputs.python-version }}
+
+      - name: Build Python environment for Windows
+        run: |
+          cd src-tauri/resources
+          setup.bat
+
+      - name: Build Tauri app for Windows
+        run: |
+          cd src-tauri
+          cargo build --release --target ${{ matrix.target }}
+          pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Create Windows installer
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release
+          # The Tauri build should create an installer
+          # For now, we'll zip the executable
+          Compress-Archive -Path "Resample2.exe" -DestinationPath "resample-windows-x64.zip"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/*.zip
+            src-tauri/target/${{ matrix.target }}/release/*.exe
+
+  create-release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          body: |
+            ## Resample ${{ steps.get_version.outputs.version }}
+
+            ### Downloads
+
+            **macOS:**
+            - Apple Silicon (ARM64): `resample-macos-arm64.zip`
+            - Intel (x64): `resample-macos-x64.zip`
+
+            **Windows:**
+            - x64: `resample-windows-x64.zip`
+
+            ### Installation
+
+            1. Download the appropriate file for your platform
+            2. Extract the archive
+            3. Run the application
+
+            ### Changes
+
+            See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+          files: |
+            macos-aarch64-apple-darwin/*.zip
+            macos-x86_64-apple-darwin/*.zip
+            windows-x86_64-pc-windows-msvc/*.zip
+          draft: false
+          prerelease: false
+
+  build-venv-packages:
+    runs-on: ubuntu-latest
+    needs: [build-macos, build-windows]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Build macOS virtual environment package
+        run: |
+          cd src-tauri/resources
+          python -m venv .venv-mac
+          source .venv-mac/bin/activate
+          pip install -r requirements-mac.txt
+          pip install --upgrade pip
+
+          # Create a portable package
+          cd .venv-mac
+          tar -czf ../../macos-venv.tar.gz .
+          cd ..
+
+      - name: Build Windows virtual environment package
+        run: |
+          cd src-tauri/resources
+          python -m venv .venv-win
+          source .venv-win/bin/activate
+          pip install -r requirements-win.txt
+          pip install --upgrade pip
+
+          # Create a portable package
+          cd .venv-win
+          tar -czf ../../windows-venv.tar.gz .
+          cd ..
+
+      - name: Upload virtual environment packages
+        uses: actions/upload-artifact@v3
+        with:
+          name: virtual-environments
+          path: |
+            macos-venv.tar.gz
+            windows-venv.tar.gz
+          retention-days: 30

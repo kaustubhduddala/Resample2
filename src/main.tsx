@@ -6,7 +6,7 @@ import { ThemeProvider } from "./hooks/use-theme.tsx";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider defaultTheme="system" storageKey="resample-ui-theme">
+    <ThemeProvider defaultTheme="system" storageKey="Resample2-ui-theme">
       <App />
     </ThemeProvider>
   </React.StrictMode>
