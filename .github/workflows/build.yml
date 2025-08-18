@@ -14,59 +14,14 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Workflow Structure:
+# - Each platform (macOS, Windows) independently sets up Python and builds
+# - No shared Python setup job - each platform handles its own dependencies
+# - Platform-specific Python version detection from setup scripts
+# - Automatic release creation when tags are pushed
+
 jobs:
-  setup-python:
-    runs-on: ubuntu-latest
-    outputs:
-      python-version: ${{ steps.python-version.outputs.python-version }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Get Python version from setup scripts
-        id: python-version
-        run: |
-          # Debug: List directory contents
-          echo "Current directory: $(pwd)"
-          echo "Repository contents:"
-          ls -la
-          echo "src-tauri contents:"
-          ls -la src-tauri/ || echo "src-tauri directory not found"
-          echo "src-tauri/resources contents:"
-          ls -la src-tauri/resources/ || echo "src-tauri/resources directory not found"
-
-          # Extract Python version requirement from setup scripts
-          if [ -f "src-tauri/resources/setup.sh" ]; then
-            echo "Found setup.sh, extracting Python version..."
-            MAC_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.sh | head -1 | grep -o '3\.[0-9]\+')
-            echo "Extracted MAC_VERSION: $MAC_VERSION"
-          else
-            echo "setup.sh not found, using default Python 3.8"
-            MAC_VERSION="3.8"
-          fi
-
-          if [ -f "src-tauri/resources/setup.bat" ]; then
-            echo "Found setup.bat, extracting Python version..."
-            WIN_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.bat | head -1 | grep -o '3\.[0-9]\+')
-            echo "Extracted WIN_VERSION: $WIN_VERSION"
-          else
-            echo "setup.bat not found, using default Python 3.8"
-            WIN_VERSION="3.8"
-          fi
-
-          # Use the higher version if they differ, default to 3.8 if both fail
-          if [[ "$MAC_VERSION" > "$WIN_VERSION" ]]; then
-            echo "Using MAC_VERSION: $MAC_VERSION"
-            echo "python-version=$MAC_VERSION" >> $GITHUB_OUTPUT
-          else
-            echo "Using WIN_VERSION: $WIN_VERSION"
-            echo "python-version=$WIN_VERSION" >> $GITHUB_OUTPUT
-          fi
-
-          echo "Final Python version: ${{ steps.python-version.outputs.python-version }}"
-
-  build-macos:
-    needs: setup-python
+    build-macos:
     runs-on: macos-latest
     strategy:
       matrix:
@@ -106,10 +61,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Setup Python
+      - name: Detect Python version for macOS
+        id: python-version
+        run: |
+          echo "Detecting Python version for macOS..."
+          if [ -f "src-tauri/resources/setup.sh" ]; then
+            PYTHON_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.sh | head -1 | grep -o '3\.[0-9]\+')
+            if [ -n "$PYTHON_VERSION" ]; then
+              echo "Detected Python version: $PYTHON_VERSION"
+              echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+            else
+              echo "Could not extract Python version, using default 3.11"
+              echo "python-version=3.11" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "setup.sh not found, using default Python 3.11"
+            echo "python-version=3.11" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python for macOS
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ needs.setup-python.outputs.python-version }}
+          python-version: ${{ steps.python-version.outputs.python-version }}
 
       - name: Build Python environment for macOS
         run: |
@@ -146,7 +119,6 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/*.app
 
   build-windows:
-    needs: setup-python
     runs-on: windows-latest
     strategy:
       matrix:
@@ -186,10 +158,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Setup Python
+      - name: Detect Python version for Windows
+        id: python-version
+        run: |
+          echo "Detecting Python version for Windows..."
+          if [ -f "src-tauri/resources/setup.bat" ]; then
+            PYTHON_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.bat | head -1 | grep -o '3\.[0-9]\+')
+            if [ -n "$PYTHON_VERSION" ]; then
+              echo "Detected Python version: $PYTHON_VERSION"
+              echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+            else
+              echo "Could not extract Python version, using default 3.11"
+              echo "python-version=3.11" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "setup.bat not found, using default Python 3.11"
+            echo "python-version=3.11" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python for Windows
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ needs.setup-python.outputs.python-version }}
+          python-version: ${{ steps.python-version.outputs.python-version }}
 
       - name: Build Python environment for Windows
         run: |
