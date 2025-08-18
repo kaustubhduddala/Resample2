@@ -21,7 +21,7 @@ env:
 # - Automatic release creation when tags are pushed
 
 jobs:
-    build-macos:
+  build-macos:
     runs-on: macos-latest
     strategy:
       matrix:
