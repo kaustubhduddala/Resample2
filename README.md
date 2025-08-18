@@ -1,6 +1,6 @@
-# Resample - AI-Powered Audio Separation Tool
+# Resample2 - Neural Network Powered Audio Separation Tool
 
-A cross-platform desktop application built with Tauri, React, and TypeScript that provides professional-grade audio separation using state-of-the-art AI models. Resample allows you to separate vocals, instruments, drums, and other audio stems from any audio file with high quality and speed.
+A cross-platform desktop application built with Tauri, React, Python, and TypeScript that provides professional-grade audio separation using state-of-the-art AI models. Resample allows you to separate vocals, instruments, drums, and other audio stems from any audio file with high quality and speed.
 
 ## Features
 
