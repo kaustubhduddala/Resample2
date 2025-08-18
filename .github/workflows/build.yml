@@ -20,21 +20,50 @@ jobs:
     outputs:
       python-version: ${{ steps.python-version.outputs.python-version }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Get Python version from setup scripts
         id: python-version
         run: |
-          # Extract Python version requirement from setup scripts
-          MAC_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.sh | head -1 | grep -o '3\.[0-9]\+')
-          WIN_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.bat | head -1 | grep -o '3\.[0-9]\+')
+          # Debug: List directory contents
+          echo "Current directory: $(pwd)"
+          echo "Repository contents:"
+          ls -la
+          echo "src-tauri contents:"
+          ls -la src-tauri/ || echo "src-tauri directory not found"
+          echo "src-tauri/resources contents:"
+          ls -la src-tauri/resources/ || echo "src-tauri/resources directory not found"
 
-          # Use the higher version if they differ
+          # Extract Python version requirement from setup scripts
+          if [ -f "src-tauri/resources/setup.sh" ]; then
+            echo "Found setup.sh, extracting Python version..."
+            MAC_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.sh | head -1 | grep -o '3\.[0-9]\+')
+            echo "Extracted MAC_VERSION: $MAC_VERSION"
+          else
+            echo "setup.sh not found, using default Python 3.8"
+            MAC_VERSION="3.8"
+          fi
+
+          if [ -f "src-tauri/resources/setup.bat" ]; then
+            echo "Found setup.bat, extracting Python version..."
+            WIN_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.bat | head -1 | grep -o '3\.[0-9]\+')
+            echo "Extracted WIN_VERSION: $WIN_VERSION"
+          else
+            echo "setup.bat not found, using default Python 3.8"
+            WIN_VERSION="3.8"
+          fi
+
+          # Use the higher version if they differ, default to 3.8 if both fail
           if [[ "$MAC_VERSION" > "$WIN_VERSION" ]]; then
+            echo "Using MAC_VERSION: $MAC_VERSION"
             echo "python-version=$MAC_VERSION" >> $GITHUB_OUTPUT
           else
+            echo "Using WIN_VERSION: $WIN_VERSION"
             echo "python-version=$WIN_VERSION" >> $GITHUB_OUTPUT
           fi
 
-          echo "Using Python version: ${{ steps.python-version.outputs.python-version }}"
+          echo "Final Python version: ${{ steps.python-version.outputs.python-version }}"
 
   build-macos:
     needs: setup-python
