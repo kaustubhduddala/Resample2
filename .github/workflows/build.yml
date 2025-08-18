@@ -19,10 +19,14 @@ env:
 # - No shared Python setup job - each platform handles its own dependencies
 # - Platform-specific Python version detection from setup scripts
 # - Automatic release creation when tags are pushed
+# - Comprehensive error handling and logging for all build steps
+# - Timeout protection (60 minutes) to prevent hanging builds
+# - Platform-specific shell usage (bash for macOS, PowerShell for Windows)
 
 jobs:
   build-macos:
     runs-on: macos-latest
+    timeout-minutes: 60
     strategy:
       matrix:
         target: [x86_64-apple-darwin, aarch64-apple-darwin]
@@ -35,23 +39,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18"
-          cache: "pnpm"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
           version: 8
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Get pnpm store directory
         shell: bash
         run: |
-          echo "STORE_DIR=$(pnpm store path --silent)" >> $GITHUB_ENV
+          echo "STORE_DIR=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
 
       - name: Setup pnpm cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.STORE_DIR }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -88,27 +91,58 @@ jobs:
         run: |
           cd src-tauri/resources
           chmod +x setup.sh
-          ./setup.sh
+          if ! ./setup.sh; then
+            echo "❌ Python environment setup failed"
+            exit 1
+          fi
+          echo "✅ Python environment setup completed"
 
       - name: Build Tauri app for macOS
         run: |
           cd src-tauri
-          cargo build --release --target ${{ matrix.target }}
-          pnpm tauri build --target ${{ matrix.target }}
+          echo "🔨 Building Rust dependencies..."
+          if ! cargo build --release --target ${{ matrix.target }}; then
+            echo "❌ Rust build failed"
+            exit 1
+          fi
+          echo "✅ Rust build completed"
+
+          echo "🔨 Building Tauri app..."
+          if ! pnpm tauri build --target ${{ matrix.target }}; then
+            echo "❌ Tauri build failed"
+            exit 1
+          fi
+          echo "✅ Tauri build completed"
 
       - name: Create DMG for macOS
         if: matrix.target == 'aarch64-apple-darwin'
         run: |
           cd src-tauri/target/aarch64-apple-darwin/release
-          # Create DMG using create-dmg or similar tool
-          # For now, we'll zip the app bundle
-          zip -r resample-macos-arm64.zip Resample2.app
+          if [ ! -d "Resample2.app" ]; then
+            echo "❌ Resample2.app not found"
+            exit 1
+          fi
+          echo "📦 Creating macOS ARM64 archive..."
+          if ! zip -r resample-macos-arm64.zip Resample2.app; then
+            echo "❌ Failed to create archive"
+            exit 1
+          fi
+          echo "✅ macOS ARM64 archive created"
 
       - name: Create ZIP for macOS Intel
         if: matrix.target == 'x86_64-apple-darwin'
         run: |
           cd src-tauri/target/x86_64-apple-darwin/release
-          zip -r resample-macos-x64.zip Resample2.app
+          if [ ! -d "Resample2.app" ]; then
+            echo "❌ Resample2.app not found"
+            exit 1
+          fi
+          echo "📦 Creating macOS Intel archive..."
+          if ! zip -r resample-macos-x64.zip Resample2.app; then
+            echo "❌ Failed to create archive"
+            exit 1
+          fi
+          echo "✅ macOS Intel archive created"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -120,6 +154,7 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     strategy:
       matrix:
         target: [x86_64-pc-windows-msvc]
@@ -132,23 +167,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18"
-          cache: "pnpm"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
           version: 8
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Get pnpm store directory
         shell: bash
         run: |
-          echo "STORE_DIR=$(pnpm store path --silent)" >> $GITHUB_ENV
+          echo "STORE_DIR=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
 
       - name: Setup pnpm cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.STORE_DIR }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -160,21 +194,23 @@ jobs:
 
       - name: Detect Python version for Windows
         id: python-version
+        shell: pwsh
         run: |
-          echo "Detecting Python version for Windows..."
-          if [ -f "src-tauri/resources/setup.bat" ]; then
-            PYTHON_VERSION=$(grep -o 'Python 3\.[0-9]\+' src-tauri/resources/setup.bat | head -1 | grep -o '3\.[0-9]\+')
-            if [ -n "$PYTHON_VERSION" ]; then
-              echo "Detected Python version: $PYTHON_VERSION"
-              echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
-            else
-              echo "Could not extract Python version, using default 3.11"
-              echo "python-version=3.11" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "setup.bat not found, using default Python 3.11"
-            echo "python-version=3.11" >> $GITHUB_OUTPUT
-          fi
+          Write-Host "Detecting Python version for Windows..."
+          if (Test-Path "src-tauri/resources/setup.bat") {
+            $content = Get-Content "src-tauri/resources/setup.bat" -Raw
+            if ($content -match 'Python 3\.(\d+)') {
+              $PYTHON_VERSION = "3.$($matches[1])"
+              Write-Host "Detected Python version: $PYTHON_VERSION"
+              Write-Host "python-version=$PYTHON_VERSION" >> $env:GITHUB_OUTPUT
+            } else {
+              Write-Host "Could not extract Python version, using default 3.11"
+              Write-Host "python-version=3.11" >> $env:GITHUB_OUTPUT
+            }
+          } else {
+            Write-Host "setup.bat not found, using default Python 3.11"
+            Write-Host "python-version=3.11" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Setup Python for Windows
         uses: actions/setup-python@v4
@@ -184,20 +220,45 @@ jobs:
       - name: Build Python environment for Windows
         run: |
           cd src-tauri/resources
-          setup.bat
+          if ! setup.bat; then
+            echo "❌ Python environment setup failed"
+            exit 1
+          fi
+          echo "✅ Python environment setup completed"
 
       - name: Build Tauri app for Windows
         run: |
           cd src-tauri
-          cargo build --release --target ${{ matrix.target }}
-          pnpm tauri build --target ${{ matrix.target }}
+          echo "🔨 Building Rust dependencies..."
+          if (! cargo build --release --target ${{ matrix.target }}) {
+            echo "❌ Rust build failed"
+            exit 1
+          }
+          echo "✅ Rust build completed"
+
+          echo "🔨 Building Tauri app..."
+          if (! pnpm tauri build --target ${{ matrix.target }}) {
+            echo "❌ Tauri build failed"
+            exit 1
+          }
+          echo "✅ Tauri build completed"
 
       - name: Create Windows installer
+        shell: pwsh
         run: |
           cd src-tauri/target/${{ matrix.target }}/release
-          # The Tauri build should create an installer
-          # For now, we'll zip the executable
-          Compress-Archive -Path "Resample2.exe" -DestinationPath "resample-windows-x64.zip"
+          if (-not (Test-Path "Resample2.exe")) {
+            Write-Host "❌ Resample2.exe not found"
+            exit 1
+          }
+          Write-Host "📦 Creating Windows archive..."
+          try {
+            Compress-Archive -Path "Resample2.exe" -DestinationPath "resample-windows-x64.zip" -Force
+            Write-Host "✅ Windows archive created"
+          } catch {
+            Write-Host "❌ Failed to create archive: $_"
+            exit 1
+          }
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
