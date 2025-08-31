@@ -50,7 +50,7 @@ A cross-platform desktop application built with Tauri, React, Python, and TypeSc
 
 ### Download Pre-built Binaries
 
-1. Go to the [Releases](https://github.com/yourusername/resample/releases) page
+1. Go to the [Releases](https://github.com/yourusername/resample/releases) page [this isnt implemented yet but will be soon]
 2. Download the appropriate version for your platform:
    - **macOS**: `.dmg` file
    - **Windows**: `.exe` installer
@@ -274,11 +274,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **React**: Frontend framework
 - **PyTorch**: Machine learning framework
 
-## Support
+## Support (these also don't work, just placeholders for now until the project itself is ready for development)
 
 - **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/yourusername/resample/issues)
 - **Discussions**: Join community discussions on [GitHub Discussions](https://github.com/yourusername/resample/discussions)
 - **Wiki**: Check the [Wiki](https://github.com/yourusername/resample/wiki) for detailed documentation
+
+
+# [will add credits asap]
 
 ## Changelog
 
