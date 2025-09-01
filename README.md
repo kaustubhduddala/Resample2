@@ -273,7 +273,7 @@ pnpm tauri build
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
 
 ## Acknowledgments
 
@@ -292,7 +292,7 @@ beveradb, Andrew Beveridge - Author of audio-separator CLI, which this project d
 > Hv - Helped implement chunks into the MDX-Net AI code. Thank you!
 > zhzhongshi - Helped add support for the MDXC models in audio-separator. Thank you!
 
-## Support (these also don't work, just placeholders for now until the project itself is ready for development)
+## Support (these also don't work, just placeholders for now until the project itself is ready for production)
 
 - **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/yourusername/resample/issues)
 - **Discussions**: Join community discussions on [GitHub Discussions](https://github.com/yourusername/resample/discussions)
