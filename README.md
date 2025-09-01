@@ -8,7 +8,10 @@
 
 # Resample2 - Neural Network Powered Audio Separation Tool
 
-A cross-platform desktop application built with Tauri, React, Python, and TypeScript that provides professional-grade audio separation using state-of-the-art AI models. Resample allows you to separate vocals, instruments, drums, and other audio stems from any audio file with high quality and speed.
+A cross-platform desktop application built with Tauri, React, Python, and TypeScript that provides professional-grade audio separation using state-of-the-art AI models. Resample2 allows you to separate vocals, instruments, drums, and other audio stems from any audio file or link, set your desired duration, which stems you want, which model you want and with a click of a button the file is processed and copied to your clipboard to be pasted into a DAW in as little as 90 seconds.
+
+<img width="1150" height="1007" alt="image" src="https://github.com/user-attachments/assets/4aee53c1-445b-4f27-b3c6-de54b1598a31" />
+
 
 ## Features
 
@@ -174,6 +177,13 @@ yt-dlp-standalone.bat "https://youtube.com/watch?v=VIDEO_ID"
 - **Other**: Additional instruments and elements
 
 ## Configuration
+
+<img width="1152" height="1006" alt="image" src="https://github.com/user-attachments/assets/4f021b68-c3e6-464d-abc2-ea3a08018e05" />
+
+<img width="1150" height="1007" alt="image" src="https://github.com/user-attachments/assets/62c5b6a2-4dfa-43fa-8d6e-e4c393a93ab0" />
+
+<img width="1152" height="1006" alt="image" src="https://github.com/user-attachments/assets/4c382a80-e11c-4b1d-ac3f-2045e798f696" />
+
 
 ### Application Settings
 
