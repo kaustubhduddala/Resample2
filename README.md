@@ -284,14 +284,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **React**: Frontend framework
 - **PyTorch**: Machine learning framework
 
+beveradb, Andrew Beveridge - Author of audio-separator CLI, which this project depends on, as well as all who contributed to it 
+> Anjok07 - Author of Ultimate Vocal Remover GUI, which almost all of the code in this repo was copied from! Definitely deserving of credit for anything good from this project. Thank you!
+> DilanBoskan - Your contributions at the start of this project were essential to the success of UVR. Thank you!
+> Kuielab & Woosung Choi - Developed the original MDX-Net AI code.
+> KimberleyJSN - Advised and aided the implementation of the training scripts for MDX-Net and Demucs. Thank you!
+> Hv - Helped implement chunks into the MDX-Net AI code. Thank you!
+> zhzhongshi - Helped add support for the MDXC models in audio-separator. Thank you!
+
 ## Support (these also don't work, just placeholders for now until the project itself is ready for development)
 
 - **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/yourusername/resample/issues)
 - **Discussions**: Join community discussions on [GitHub Discussions](https://github.com/yourusername/resample/discussions)
 - **Wiki**: Check the [Wiki](https://github.com/yourusername/resample/wiki) for detailed documentation
 
-
-# [will add credits asap]
 
 ## Changelog
 
