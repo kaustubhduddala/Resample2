@@ -84,6 +84,10 @@ function App() {
   const [videoInfo, setVideoInfo] = useState<any>(null);
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
+  const [spotifyInfo, setSpotifyInfo] = useState<any>(null);
+  const [youtubeUrlFromSpotify, setYoutubeUrlFromSpotify] = useState<
+    string | null
+  >(null);
   const [showSettings, setShowSettings] = useState(false);
   const [stemDropdownOpen, setStemDropdownOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -352,6 +356,112 @@ function App() {
     }
   }, [url, addConsoleMessage]);
 
+  // Handle loading Spotify track info and finding YouTube URL
+  const handleLoadSpotifyInfo = useCallback(
+    async (spotifyUrl: string) => {
+      if (!spotifyUrl.trim()) {
+        addConsoleMessage("✗ Empty Spotify URL provided");
+        return;
+      }
+
+      if (!window.electronAPI) {
+        addConsoleMessage(
+          "✗ Electron API not available. Please restart the app."
+        );
+        return;
+      }
+
+      setIsLoadingVideo(true);
+      addConsoleMessage(`Loading Spotify track info...`);
+
+      try {
+        const result =
+          await window.electronAPI.getSpotifyTrackAndYouTube(spotifyUrl);
+
+        if (result.success && result.spotifyInfo) {
+          setSpotifyInfo(result.spotifyInfo);
+
+          if (result.youtubeUrl) {
+            setYoutubeUrlFromSpotify(result.youtubeUrl);
+            addConsoleMessage(`✓ Found on YouTube: ${result.youtubeUrl}`);
+
+            // Use the YouTube video info directly from the search result
+            if (result.youtubeVideoInfo) {
+              setVideoInfo({
+                title: result.youtubeVideoInfo.title,
+                uploader: result.youtubeVideoInfo.uploader,
+                duration: result.youtubeVideoInfo.duration,
+                thumbnail: result.youtubeVideoInfo.thumbnail,
+              });
+
+              // Set thumbnail
+              if (result.youtubeVideoInfo.thumbnail) {
+                videoThumbnailRef.current = result.youtubeVideoInfo.thumbnail;
+              } else if (result.spotifyInfo.thumbnail) {
+                videoThumbnailRef.current = result.spotifyInfo.thumbnail;
+              }
+
+              // Use YouTube duration (more accurate for download)
+              if (result.youtubeVideoInfo.duration) {
+                const duration = Math.floor(result.youtubeVideoInfo.duration);
+                setMediaDuration(duration);
+                setMaxDuration(duration);
+                setTimeRange([0, duration]);
+              } else if (result.spotifyInfo.duration) {
+                // Fallback to Spotify duration
+                const duration = Math.floor(result.spotifyInfo.duration);
+                setMediaDuration(duration);
+                setMaxDuration(duration);
+                setTimeRange([0, duration]);
+              }
+            } else if (result.spotifyInfo.duration) {
+              // Use Spotify info if no YouTube info
+              const duration = Math.floor(result.spotifyInfo.duration);
+              setMediaDuration(duration);
+              setMaxDuration(duration);
+              setTimeRange([0, duration]);
+
+              if (result.spotifyInfo.thumbnail) {
+                videoThumbnailRef.current = result.spotifyInfo.thumbnail;
+              }
+            }
+          } else {
+            addConsoleMessage("⚠ Could not find this track on YouTube");
+            setYoutubeUrlFromSpotify(null);
+
+            // Still set Spotify info for display
+            if (result.spotifyInfo.duration) {
+              const duration = Math.floor(result.spotifyInfo.duration);
+              setMediaDuration(duration);
+              setMaxDuration(duration);
+              setTimeRange([0, duration]);
+            }
+            if (result.spotifyInfo.thumbnail) {
+              videoThumbnailRef.current = result.spotifyInfo.thumbnail;
+            }
+          }
+
+          addConsoleMessage(
+            `✓ Loaded: ${result.spotifyInfo.title || "Track"}${
+              result.spotifyInfo.artist
+                ? ` by ${result.spotifyInfo.artist}`
+                : ""
+            }`
+          );
+        } else {
+          addConsoleMessage(
+            `✗ Failed to load Spotify track: ${result.error || "Unknown error"}`
+          );
+        }
+      } catch (error) {
+        addConsoleMessage(`✗ Error loading Spotify track: ${error}`);
+      } finally {
+        setIsLoadingVideo(false);
+      }
+    },
+    [addConsoleMessage]
+  );
+
   // Auto-load video info when URL changes and it's a YouTube URL
   useEffect(() => {
     if (url.trim() && inputType === "YouTube" && isYouTubeUrl(url)) {
@@ -384,12 +494,46 @@ function App() {
     }
   }, [url, inputType, handleLoadVideoInfo, addConsoleMessage]);
 
+  // Auto-load Spotify info when URL changes and it's a Spotify URL
+  useEffect(() => {
+    if (url.trim() && inputType === "Spotify" && url.includes("spotify.com")) {
+      // Wait for electronAPI to be available
+      const waitAndLoad = async () => {
+        // Wait up to 2 seconds for API to be available
+        for (let i = 0; i < 20; i++) {
+          if (window.electronAPI) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        if (!window.electronAPI) {
+          addConsoleMessage(
+            "✗ Electron API not available. Please restart the app."
+          );
+          return;
+        }
+
+        addConsoleMessage(`Detected Spotify URL: ${url}`);
+        const timeoutId = setTimeout(() => {
+          handleLoadSpotifyInfo(url);
+        }, 800); // Debounce for 800ms
+
+        return () => clearTimeout(timeoutId);
+      };
+
+      waitAndLoad();
+    }
+  }, [url, inputType, handleLoadSpotifyInfo, addConsoleMessage]);
+
   // Handle URL input change with validation
   const handleUrlChange = (value: string) => {
     setUrl(value);
     // Clear video info when URL is cleared
     if (!value.trim()) {
       setVideoInfo(null);
+      setSpotifyInfo(null);
+      setYoutubeUrlFromSpotify(null);
       setMediaDuration(null);
       videoThumbnailRef.current = null;
       setMaxDuration(300);
@@ -477,15 +621,25 @@ function App() {
   };
 
   const handleDownload = async () => {
-    if (!url.trim() || inputType !== "YouTube" || !window.electronAPI) {
-      addConsoleMessage("Please enter a valid YouTube URL");
+    if (!url.trim() || !window.electronAPI) {
+      addConsoleMessage("Please enter a valid URL");
+      return;
+    }
+
+    // Determine the actual download URL
+    let downloadUrl = url;
+    if (inputType === "Spotify" && youtubeUrlFromSpotify) {
+      downloadUrl = youtubeUrlFromSpotify;
+      addConsoleMessage(`Using YouTube URL found from Spotify: ${downloadUrl}`);
+    } else if (inputType !== "YouTube" && inputType !== "Spotify") {
+      addConsoleMessage("Please enter a valid YouTube or Spotify URL");
       return;
     }
 
     setIsDownloading(true);
     setProgressStatus("downloading");
     setProgress(0);
-    addConsoleMessage(`Starting download: ${url}`);
+    addConsoleMessage(`Starting download: ${downloadUrl}`);
 
     try {
       // Determine format based on settings
@@ -514,7 +668,7 @@ function App() {
       );
 
       // Download with all settings
-      const result = await window.electronAPI.downloadVideo(url, {
+      const result = await window.electronAPI.downloadVideo(downloadUrl, {
         outputPath,
         format,
         startTime: timeRange[0],
@@ -843,13 +997,28 @@ function App() {
                         inputType === "YouTube" &&
                         isYouTubeUrl(url) &&
                         videoInfo ? (
-                        // YouTube embed for YouTube videos
+                        // YouTube embed for YouTube URLs
                         <iframe
                           src={`https://www.youtube.com/embed/${getYouTubeVideoId(url)}?start=${Math.floor(timeRange[0])}&end=${Math.floor(timeRange[1])}&rel=0`}
                           className="w-full h-full rounded-lg"
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                           allowFullScreen
                           title="Video preview"
+                        />
+                      ) : inputType === "Spotify" && youtubeUrlFromSpotify ? (
+                        // YouTube embed for Spotify tracks (using found YouTube URL)
+                        <iframe
+                          src={`https://www.youtube.com/embed/${getYouTubeVideoId(youtubeUrlFromSpotify)}?start=${Math.floor(timeRange[0])}&end=${Math.floor(timeRange[1])}&rel=0`}
+                          className="w-full h-full rounded-lg"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          title="Video preview"
+                        />
+                      ) : spotifyInfo?.thumbnail ? (
+                        <img
+                          src={spotifyInfo.thumbnail}
+                          alt="Track thumbnail"
+                          className="w-full h-full object-cover"
                         />
                       ) : videoThumbnailRef.current ? (
                         <img
@@ -869,14 +1038,30 @@ function App() {
                   </div>
 
                   <div className="space-y-4">
-                    {videoInfo?.title && (
+                    {(spotifyInfo || videoInfo) && (
                       <div className="space-y-2">
                         <label className="text-xs text-slate-400 block">
-                          {videoInfo.title}
-                          {videoInfo.uploader && ` - ${videoInfo.uploader}`}
+                          {spotifyInfo
+                            ? `${spotifyInfo.title || "Track"}${
+                                spotifyInfo.artist
+                                  ? ` - ${spotifyInfo.artist}`
+                                  : ""
+                              }${spotifyInfo.album ? ` (${spotifyInfo.album})` : ""}`
+                            : videoInfo?.title
+                              ? `${videoInfo.title}${
+                                  videoInfo.uploader
+                                    ? ` - ${videoInfo.uploader}`
+                                    : ""
+                                }`
+                              : "Loading..."}
                           {typeof mediaDuration === "number" &&
                             ` (${formatTimeToHHMMSS(mediaDuration)})`}
                         </label>
+                        {spotifyInfo && youtubeUrlFromSpotify && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Found on YouTube
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -1026,7 +1211,11 @@ function App() {
                   <Button
                     className="text-slate-100 dark:text-slate-300 h-10"
                     onClick={handleDownload}
-                    disabled={!url.trim() || inputType === "Unknown"}
+                    disabled={
+                      !url.trim() ||
+                      inputType === "Unknown" ||
+                      (inputType === "Spotify" && !youtubeUrlFromSpotify)
+                    }
                   >
                     {isDownloading || isSeparating ? (
                       <>

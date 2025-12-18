@@ -9,6 +9,9 @@ import {
   getThumbnails,
   downloadVideo,
 } from './services/ytdlp-service.js';
+import {
+  getSpotifyTrackAndYouTubeUrl,
+} from './services/spotify-service.js';
 
 // Settings file path
 const getSettingsPath = () => {
@@ -181,6 +184,16 @@ ipcMain.handle('ytdlp:download', async (event, url: string, options: any) => {
 
     const result = await downloadVideo(url, downloadOptions);
     return { success: true, result };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// Spotify track info and YouTube URL lookup
+ipcMain.handle('spotify:get-track-and-youtube', async (_, spotifyUrl: string) => {
+  try {
+    const result = await getSpotifyTrackAndYouTubeUrl(spotifyUrl);
+    return { success: true, ...result };
   } catch (error) {
     return { success: false, error: String(error) };
   }

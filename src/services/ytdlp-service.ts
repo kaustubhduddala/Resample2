@@ -4,7 +4,7 @@ import { YtDlp, helpers } from 'ytdlp-nodejs';
 let ytdlp: YtDlp | null = null;
 
 // Get or create YtDlp instance with proper paths
-function getYtDlpInstance(): YtDlp {
+export function getYtDlpInstance(): YtDlp {
   if (ytdlp) {
     return ytdlp;
   }

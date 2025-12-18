@@ -39,6 +39,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVideoInfo: (url: string) => ipcRenderer.invoke('ytdlp:get-info', url),
   getThumbnails: (url: string) => ipcRenderer.invoke('ytdlp:get-thumbnails', url),
   
+  // Spotify
+  getSpotifyTrackAndYouTube: (spotifyUrl: string) =>
+    ipcRenderer.invoke('spotify:get-track-and-youtube', spotifyUrl),
+  
   // Download
   downloadVideo: (url: string, options: any) =>
     ipcRenderer.invoke('ytdlp:download', url, options),
@@ -80,6 +84,13 @@ declare global {
       checkFFmpeg: () => Promise<{ success: boolean; installed?: boolean; error?: string }>;
       getVideoInfo: (url: string) => Promise<{ success: boolean; info?: any; error?: string }>;
       getThumbnails: (url: string) => Promise<{ success: boolean; thumbnails?: any[]; error?: string }>;
+      getSpotifyTrackAndYouTube: (spotifyUrl: string) => Promise<{ 
+        success: boolean; 
+        spotifyInfo?: any; 
+        youtubeUrl?: string | null; 
+        youtubeVideoInfo?: { title: string | null; duration: number | null; thumbnail: string | null; uploader: string | null } | null;
+        error?: string 
+      }>;
       downloadVideo: (url: string, options: any) => Promise<{ success: boolean; result?: string; error?: string }>;
       onDownloadProgress: (callback: (progress: any) => void) => void;
       removeDownloadProgressListener: () => void;
