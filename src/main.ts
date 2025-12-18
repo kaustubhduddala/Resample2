@@ -1,0 +1,423 @@
+import { app, BrowserWindow, nativeImage, ipcMain, dialog, shell } from 'electron';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import {
+  checkAndSetupFFmpeg,
+  getVideoInfo,
+  getThumbnails,
+  downloadVideo,
+} from './services/ytdlp-service.js';
+
+// Settings file path
+const getSettingsPath = () => {
+  const userDataPath = app.getPath('userData');
+  return path.join(userDataPath, 'settings.json');
+};
+
+// Default settings
+const defaultSettings = {
+  download_path: path.join(os.homedir(), 'Documents', 'Resample2'),
+  audio_format: 'mp3',
+  audio_quality: '0', // 0 = best
+  video_format: 'mp4',
+  video_quality: 'best',
+  extract_audio: true,
+  write_subtitles: false,
+  write_thumbnail: false,
+  write_description: false,
+  write_info: false,
+  separation_settings: { output_format: 'FLAC' },
+  model_directory: path.join(os.homedir(), 'Documents', 'Resample2', 'Models'),
+  theme: 'system',
+};
+
+// Load settings from file
+const loadSettings = (): typeof defaultSettings => {
+  try {
+    const settingsPath = getSettingsPath();
+    if (fs.existsSync(settingsPath)) {
+      const data = fs.readFileSync(settingsPath, 'utf-8');
+      return { ...defaultSettings, ...JSON.parse(data) };
+    }
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
+  return defaultSettings;
+};
+
+// Save settings to file
+const saveSettings = (settings: typeof defaultSettings): boolean => {
+  try {
+    const settingsPath = getSettingsPath();
+    const dir = path.dirname(settingsPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    return false;
+  }
+};
+
+// Ensure directory exists
+const ensureDirectoryExists = (dirPath: string): boolean => {
+  try {
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+    return true;
+  } catch (error) {
+    console.error('Error creating directory:', error);
+    return false;
+  }
+};
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// The built HTML file - Electron Forge will place it in the renderer output
+const HTML_FILE = path.join(__dirname, '../renderer/main_window/index.html');
+
+// Set app icon based on platform
+const getIconPath = () => {
+  // In development, assets are in src/assets
+  // In production, they should be copied to the build output
+  const assetsPath = process.env.NODE_ENV === 'development' 
+    ? path.join(__dirname, '../../src/assets')
+    : path.join(__dirname, '../assets');
+  
+  if (process.platform === 'win32') {
+    return path.join(assetsPath, 'icon.ico');
+  } else if (process.platform === 'darwin') {
+    return path.join(assetsPath, 'icon.icns');
+  } else {
+    return path.join(assetsPath, 'icon.png');
+  }
+};
+
+// Handle creating/removing shortcuts on Windows when installing/uninstalling
+// This is handled by the package.json script, but we can also check here
+// Note: electron-squirrel-startup is CommonJS, handled at build time
+
+const createWindow = (): void => {
+  // Create the browser window
+  const mainWindow = new BrowserWindow({
+    width: 1100,
+    height: 900,
+    minWidth: 1100,
+    minHeight: 900,
+    icon: getIconPath(), // Set window icon
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  // Load the app
+  if (process.env.NODE_ENV === 'development') {
+    // In development, load from Vite dev server
+    mainWindow.loadURL('http://localhost:5173');
+    // Open DevTools in development
+    mainWindow.webContents.openDevTools();
+  } else {
+    // In production, load the built HTML file
+    mainWindow.loadFile(HTML_FILE);
+  }
+};
+
+// Set up IPC handlers
+ipcMain.handle('ytdlp:check-ffmpeg', async () => {
+  try {
+    const isInstalled = await checkAndSetupFFmpeg();
+    return { success: true, installed: isInstalled };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('ytdlp:get-info', async (_, url: string) => {
+  try {
+    const info = await getVideoInfo(url);
+    return { success: true, info };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('ytdlp:get-thumbnails', async (_, url: string) => {
+  try {
+    const thumbnails = await getThumbnails(url);
+    return { success: true, thumbnails };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('ytdlp:download', async (event, url: string, options: any) => {
+  try {
+    // Create a progress callback that sends updates via IPC
+    let lastProgress = 0;
+    const progressCallback = (progress: any) => {
+      const percent = progress.percent || 0;
+      // Send progress updates every 1% or on completion
+      if (Math.abs(percent - lastProgress) >= 1 || percent === 100) {
+        lastProgress = percent;
+        // Send progress update to renderer via webContents
+        const window = BrowserWindow.fromWebContents(event.sender);
+        if (window) {
+          window.webContents.send('download-progress', { percent, progress });
+        }
+      }
+    };
+
+    const downloadOptions = {
+      ...options,
+      onProgress: progressCallback,
+    };
+
+    const result = await downloadVideo(url, downloadOptions);
+    return { success: true, result };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('dialog:open-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Audio/Video Files', extensions: ['mp4', 'mp3', 'wav', 'm4a', 'flac', 'webm', 'mkv', 'avi'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    return { success: true, filePaths: result.filePaths };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// Directory selection dialog
+ipcMain.handle('dialog:open-directory', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return { success: true, filePaths: result.filePaths };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// Open path in system file explorer
+ipcMain.handle('shell:open-path', async (_, filePath: string) => {
+  try {
+    // Expand ~ to home directory
+    const expandedPath = filePath.startsWith('~')
+      ? path.join(os.homedir(), filePath.slice(1))
+      : filePath;
+    
+    // Ensure directory exists before opening
+    ensureDirectoryExists(expandedPath);
+    
+    await shell.openPath(expandedPath);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// Settings management
+ipcMain.handle('settings:load', async () => {
+  try {
+    const settings = loadSettings();
+    return { success: true, settings };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('settings:save', async (_, settings: typeof defaultSettings) => {
+  try {
+    const saved = saveSettings(settings);
+    if (saved) {
+      // Ensure download directories exist
+      ensureDirectoryExists(settings.download_path);
+      ensureDirectoryExists(path.join(settings.download_path, 'Downloads'));
+      ensureDirectoryExists(path.join(settings.download_path, 'Separated'));
+      ensureDirectoryExists(settings.model_directory);
+    }
+    return { success: saved };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// Get default paths
+ipcMain.handle('paths:get-defaults', async () => {
+  return {
+    success: true,
+    paths: {
+      home: os.homedir(),
+      documents: path.join(os.homedir(), 'Documents'),
+      downloads: path.join(os.homedir(), 'Downloads'),
+      defaultDownloadPath: defaultSettings.download_path,
+      defaultModelDirectory: defaultSettings.model_directory,
+    },
+  };
+});
+
+// List files in the downloads directory
+ipcMain.handle('files:list-downloads', async (_, downloadPath: string) => {
+  try {
+    const downloadsDir = path.join(downloadPath, 'Downloads');
+    const separatedDir = path.join(downloadPath, 'Separated');
+
+    const files: Array<{
+      id: string;
+      name: string;
+      path: string;
+      file_size: number;
+      created: number;
+      created_display: string;
+      directory_type: 'downloads' | 'separated';
+      file_extension: string;
+    }> = [];
+
+    // Supported audio/video extensions
+    const supportedExtensions = ['.mp3', '.mp4', '.wav', '.m4a', '.flac', '.opus', '.webm', '.mkv', '.avi', '.ogg'];
+
+    // Read downloads directory
+    if (fs.existsSync(downloadsDir)) {
+      const downloadFiles = fs.readdirSync(downloadsDir);
+      for (const file of downloadFiles) {
+        const ext = path.extname(file).toLowerCase();
+        if (supportedExtensions.includes(ext)) {
+          const filePath = path.join(downloadsDir, file);
+          try {
+            const stats = fs.statSync(filePath);
+            files.push({
+              id: `${filePath}-${stats.mtimeMs}`,
+              name: file,
+              path: filePath,
+              file_size: stats.size,
+              created: stats.mtimeMs,
+              created_display: new Date(stats.mtime).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              directory_type: 'downloads',
+              file_extension: ext.slice(1).toUpperCase(),
+            });
+          } catch (e) {
+            // Skip files we can't stat
+          }
+        }
+      }
+    }
+
+    // Read separated directory
+    if (fs.existsSync(separatedDir)) {
+      const separatedFiles = fs.readdirSync(separatedDir);
+      for (const file of separatedFiles) {
+        const ext = path.extname(file).toLowerCase();
+        if (supportedExtensions.includes(ext)) {
+          const filePath = path.join(separatedDir, file);
+          try {
+            const stats = fs.statSync(filePath);
+            files.push({
+              id: `${filePath}-${stats.mtimeMs}`,
+              name: file,
+              path: filePath,
+              file_size: stats.size,
+              created: stats.mtimeMs,
+              created_display: new Date(stats.mtime).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              directory_type: 'separated',
+              file_extension: ext.slice(1).toUpperCase(),
+            });
+          } catch (e) {
+            // Skip files we can't stat
+          }
+        }
+      }
+    }
+
+    // Sort by creation date, newest first
+    files.sort((a, b) => b.created - a.created);
+
+    return { success: true, files };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// Delete a file
+ipcMain.handle('files:delete', async (_, filePath: string) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return { success: true };
+    }
+    return { success: false, error: 'File not found' };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// Show file in folder (reveal in finder/explorer)
+ipcMain.handle('files:show-in-folder', async (_, filePath: string) => {
+  try {
+    shell.showItemInFolder(filePath);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+// This method will be called when Electron has finished initialization
+app.on('ready', async () => {
+  // Set macOS dock icon
+  if (process.platform === 'darwin' && app.dock) {
+    try {
+      const iconPath = getIconPath();
+      const icon = nativeImage.createFromPath(iconPath);
+      if (!icon.isEmpty()) {
+        app.dock.setIcon(icon);
+      }
+    } catch (error) {
+      console.warn('Could not load app icon:', error);
+    }
+  }
+
+  // Check FFmpeg on app startup
+  console.log('Checking FFmpeg installation...');
+  await checkAndSetupFFmpeg();
+  
+  createWindow();
+});
+
+// Quit when all windows are closed, except on macOS
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  // On macOS, re-create a window when the dock icon is clicked
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+
