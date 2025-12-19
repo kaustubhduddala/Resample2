@@ -117,3 +117,4 @@ On the first run, the binary will attempt to download the AI models (approx 100M
 
 - By default, models are saved to `/tmp/audio-separator-models/`.
 - **Recommendation**: Pass `model_file_dir` in your JSON options to save them to a persistent user folder (e.g., `%APPDATA%` or Application Support) so the user doesn't re-download them every time.
+
