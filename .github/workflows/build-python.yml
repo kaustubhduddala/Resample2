@@ -64,7 +64,7 @@ jobs:
       - name: Build with PyInstaller
         # This points to where your .spec file is. 
         # Make sure src/py-service/build.spec exists!
-        run: pyinstaller src/py-service/build.spec
+        run: pyinstaller src/py-service/audio-engine.spec
 
       # --- THE FIX IS HERE: Updated to v4 ---
       - name: Upload Artifacts
