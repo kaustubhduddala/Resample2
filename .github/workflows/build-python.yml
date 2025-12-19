@@ -12,17 +12,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows x64 (NVIDIA GPU support included)
           - os: windows-latest
             platform: windows
             pip_extra: "[gpu]"
 
-          # Mac - Apple Silicon (M1/M2/M3)
           - os: macos-14
             platform: darwin
             pip_extra: "[cpu]"
 
-          # Mac - Intel
           - os: macos-15
             platform: darwin
             pip_extra: "[cpu]"
@@ -32,13 +29,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # FIX: Use Python 3.11 to avoid the broken 3.10 libintl error on Mac
       - name: Set up Python (x64)
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
-          architecture: "x64" # <-- Explicitly force 64-bit
+          python-version: "3.11"
+          architecture: "x64"
 
-      # FFmpeg is needed for Mac (Windows usually gets it via static link or user install)
       - name: Install FFmpeg (Mac)
         if: matrix.platform == 'darwin'
         run: brew install ffmpeg
@@ -47,12 +44,10 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install pyinstaller
-          # Install the specific version needed
           pip install "audio-separator${{ matrix.pip_extra }}"
 
       - name: Build with PyInstaller
-        # Ensure your spec file path matches this!
-        run: pyinstaller src/py-service/audio-engine.spec
+        run: pyinstaller src/py-service/build.spec
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
