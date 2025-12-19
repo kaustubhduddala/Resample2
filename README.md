@@ -5,7 +5,7 @@
 > audio sample (no seriously, 5764 segments at an average of 30 seconds per iteration -- you do the math). That to me is not viable at the moment so I'm pausing development until I can
 > figure out what's going on. Feel free to put in a PR if you can figure it out.
 
-## Resample2 – Desktop Shell for an AI Audio Separation Tool
+## Resample2 – AIO Web Audio Downloading and Neural Network Based Stem Separation Application
 
 Resample2 is intended to become a cross‑platform desktop application for stem separation
 (vocals, drums, bass, instruments, etc.).
