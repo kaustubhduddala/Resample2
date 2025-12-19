@@ -1,9 +1,13 @@
 name: Build and Release
 
 on:
+  # This adds the manual "Run workflow" button
+  workflow_dispatch:
+
+  # Keep this if you still want it to run on tags later
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build-python:
@@ -12,11 +16,11 @@ jobs:
         include:
           - os: windows-latest
             platform: win32
-            pip_extra: "[gpu]"  # Windows usually targets NVIDIA
-          - os: macos-13      # Intel Mac
+            pip_extra: "[gpu]" # Windows usually targets NVIDIA
+          - os: macos-13 # Intel Mac
             platform: darwin
             pip_extra: "[cpu]"
-          - os: macos-14      # Apple Silicon (M1/M2/M3)
+          - os: macos-14 # Apple Silicon (M1/M2/M3)
             platform: darwin
             pip_extra: "[cpu]" # CoreML is enabled via [cpu] on Mac
           - os: ubuntu-latest
@@ -31,7 +35,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10' 
+          python-version: "3.10"
 
       # FFmpeg handling: For Mac/Linux, usually apt/brew. For Windows, download static.
       - name: Install FFmpeg (Linux)
