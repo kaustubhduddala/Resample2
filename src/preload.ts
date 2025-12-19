@@ -12,7 +12,45 @@ interface AppSettings {
   write_thumbnail: boolean;
   write_description: boolean;
   write_info: boolean;
-  separation_settings: { output_format: string };
+  separation_settings: {
+    output_format: string;
+    output_bitrate?: string | null;
+    normalization_threshold?: number;
+    amplification_threshold?: number;
+    output_single_stem?: string | null;
+    sample_rate?: number;
+    use_soundfile?: boolean;
+    use_autocast?: boolean;
+    mdx_params?: {
+      segment_size?: number;
+      overlap?: number;
+      batch_size?: number;
+      hop_length?: number;
+      enable_denoise?: boolean;
+    };
+    vr_params?: {
+      batch_size?: number;
+      window_size?: number;
+      aggression?: number;
+      enable_tta?: boolean;
+      enable_post_process?: boolean;
+      post_process_threshold?: number;
+      high_end_process?: boolean;
+    };
+    demucs_params?: {
+      segment_size?: string | number;
+      shifts?: number;
+      overlap?: number;
+      segments_enabled?: boolean;
+    };
+    mdxc_params?: {
+      segment_size?: number;
+      override_model_segment_size?: boolean;
+      batch_size?: number;
+      overlap?: number;
+      pitch_shift?: number;
+    };
+  };
   model_directory: string;
   theme: string;
 }
@@ -85,6 +123,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeAudioSeparationProgressListener: () => {
     ipcRenderer.removeAllListeners('audio-separation-progress');
   },
+  
+  // Model management
+  listModels: () => ipcRenderer.invoke('models:list'),
+  downloadModel: (modelFilename: string, modelDirectory: string) =>
+    ipcRenderer.invoke('models:download', modelFilename, modelDirectory),
+  listDownloadedModels: (modelDirectory: string) =>
+    ipcRenderer.invoke('models:list-downloaded', modelDirectory),
+  deleteModel: (modelFilename: string, modelDirectory: string) =>
+    ipcRenderer.invoke('models:delete', modelFilename, modelDirectory),
 });
 
 // Type definitions for TypeScript
@@ -116,6 +163,10 @@ declare global {
       separateAudio: (filePath: string, outputDir: string, options?: any) => Promise<{ status: string; files?: string[]; message?: string; error?: string }>;
       onAudioSeparationProgress: (callback: (progress: { message: string; isError?: boolean }) => void) => void;
       removeAudioSeparationProgressListener: () => void;
+      listModels: () => Promise<{ success: boolean; models?: any[]; error?: string }>;
+      downloadModel: (modelFilename: string, modelDirectory: string) => Promise<{ success: boolean; error?: string }>;
+      listDownloadedModels: (modelDirectory: string) => Promise<{ success: boolean; models?: any[]; error?: string }>;
+      deleteModel: (modelFilename: string, modelDirectory: string) => Promise<{ success: boolean; error?: string }>;
     };
   }
 }

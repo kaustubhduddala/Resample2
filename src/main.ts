@@ -10,6 +10,12 @@ import {
   downloadVideo,
   getFFmpegPath,
 } from './services/ytdlp-service.js';
+import {
+  listModels,
+  downloadModel,
+  listDownloadedModels,
+  deleteModel,
+} from './services/model-service.js';
 import { spawn } from 'node:child_process';
 import {
   getSpotifyTrackAndYouTubeUrl,
@@ -33,7 +39,49 @@ const defaultSettings = {
   write_thumbnail: false,
   write_description: false,
   write_info: false,
-  separation_settings: { output_format: 'FLAC' },
+  separation_settings: {
+    output_format: 'FLAC',
+    output_bitrate: null as string | null,
+    normalization_threshold: 0.9,
+    amplification_threshold: 0.0,
+    output_single_stem: null as string | null,
+    sample_rate: 44100,
+    use_soundfile: false,
+    use_autocast: false,
+    // MDX Architecture Parameters
+    mdx_params: {
+      segment_size: 256,
+      overlap: 0.25,
+      batch_size: 1,
+      hop_length: 1024,
+      enable_denoise: false,
+    },
+    // VR Architecture Parameters
+    vr_params: {
+      batch_size: 1,
+      window_size: 512,
+      aggression: 5,
+      enable_tta: false,
+      enable_post_process: false,
+      post_process_threshold: 0.2,
+      high_end_process: false,
+    },
+    // Demucs Architecture Parameters
+    demucs_params: {
+      segment_size: 'Default',
+      shifts: 2,
+      overlap: 0.25,
+      segments_enabled: true,
+    },
+    // MDXC Architecture Parameters
+    mdxc_params: {
+      segment_size: 256,
+      override_model_segment_size: false,
+      batch_size: 1,
+      overlap: 8,
+      pitch_shift: 0,
+    },
+  },
   model_directory: path.join(os.homedir(), 'Documents', 'Resample2', 'Models'),
   theme: 'system',
 };
@@ -400,6 +448,43 @@ ipcMain.handle('files:show-in-folder', async (_, filePath: string) => {
   }
 });
 
+// Model management handlers
+ipcMain.handle('models:list', async () => {
+  try {
+    const models = await listModels();
+    return { success: true, models };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('models:download', async (_, modelFilename: string, modelDirectory: string) => {
+  try {
+    await downloadModel(modelFilename, modelDirectory);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('models:list-downloaded', async (_, modelDirectory: string) => {
+  try {
+    const models = await listDownloadedModels(modelDirectory);
+    return { success: true, models };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('models:delete', async (_, modelFilename: string, modelDirectory: string) => {
+  try {
+    await deleteModel(modelFilename, modelDirectory);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
 // Helper to find the Python binary (handles Dev vs Prod)
 const getPythonBinaryPath = (): string => {
   const binaryName = process.platform === 'win32' ? 'audio-engine.exe' : 'audio-engine';
@@ -436,11 +521,173 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
       const settings = loadSettings();
       const modelFileDir = settings.model_directory || path.join(app.getPath('userData'), 'models');
       
-      // Merge settings into options (user-provided options take precedence)
-      const finalOptions = {
+      // Build final options, only including non-default values
+      const finalOptions: any = {
         model_file_dir: modelFileDir,
-        ...options, // User options override defaults
       };
+      
+      // Add user-provided options (they override defaults)
+      if (options) {
+        Object.assign(finalOptions, options);
+      }
+      
+      // Merge separation settings, only including non-default values
+      const sepSettings = settings.separation_settings;
+      
+      // Common settings
+      if (sepSettings.output_format && sepSettings.output_format !== 'FLAC') {
+        finalOptions.output_format = sepSettings.output_format;
+      }
+      if (sepSettings.output_bitrate) {
+        finalOptions.output_bitrate = sepSettings.output_bitrate;
+      }
+      if (sepSettings.normalization_threshold !== undefined && sepSettings.normalization_threshold !== 0.9) {
+        finalOptions.normalization_threshold = sepSettings.normalization_threshold;
+      }
+      if (sepSettings.amplification_threshold !== undefined && sepSettings.amplification_threshold !== 0.0) {
+        finalOptions.amplification_threshold = sepSettings.amplification_threshold;
+      }
+      if (sepSettings.output_single_stem) {
+        finalOptions.output_single_stem = sepSettings.output_single_stem;
+      }
+      if (sepSettings.sample_rate !== undefined && sepSettings.sample_rate !== 44100) {
+        finalOptions.sample_rate = sepSettings.sample_rate;
+      }
+      if (sepSettings.use_soundfile) {
+        finalOptions.use_soundfile = sepSettings.use_soundfile;
+      }
+      if (sepSettings.use_autocast) {
+        finalOptions.use_autocast = sepSettings.use_autocast;
+      }
+      
+      // Architecture-specific parameters - only include if they differ from defaults
+      if (sepSettings.mdx_params) {
+        const mdx = sepSettings.mdx_params;
+        const mdxParams: any = {};
+        let hasMdxParams = false;
+        
+        if (mdx.segment_size !== undefined && mdx.segment_size !== 256) {
+          mdxParams.segment_size = mdx.segment_size;
+          hasMdxParams = true;
+        }
+        if (mdx.overlap !== undefined && mdx.overlap !== 0.25) {
+          mdxParams.overlap = mdx.overlap;
+          hasMdxParams = true;
+        }
+        if (mdx.batch_size !== undefined && mdx.batch_size !== 1) {
+          mdxParams.batch_size = mdx.batch_size;
+          hasMdxParams = true;
+        }
+        if (mdx.hop_length !== undefined && mdx.hop_length !== 1024) {
+          mdxParams.hop_length = mdx.hop_length;
+          hasMdxParams = true;
+        }
+        if (mdx.enable_denoise) {
+          mdxParams.enable_denoise = mdx.enable_denoise;
+          hasMdxParams = true;
+        }
+        
+        if (hasMdxParams) {
+          finalOptions.mdx_params = mdxParams;
+        }
+      }
+      
+      if (sepSettings.vr_params) {
+        const vr = sepSettings.vr_params;
+        const vrParams: any = {};
+        let hasVrParams = false;
+        
+        if (vr.batch_size !== undefined && vr.batch_size !== 1) {
+          vrParams.batch_size = vr.batch_size;
+          hasVrParams = true;
+        }
+        if (vr.window_size !== undefined && vr.window_size !== 512) {
+          vrParams.window_size = vr.window_size;
+          hasVrParams = true;
+        }
+        if (vr.aggression !== undefined && vr.aggression !== 5) {
+          vrParams.aggression = vr.aggression;
+          hasVrParams = true;
+        }
+        if (vr.enable_tta) {
+          vrParams.enable_tta = vr.enable_tta;
+          hasVrParams = true;
+        }
+        if (vr.high_end_process) {
+          vrParams.high_end_process = vr.high_end_process;
+          hasVrParams = true;
+        }
+        if (vr.enable_post_process) {
+          vrParams.enable_post_process = vr.enable_post_process;
+          hasVrParams = true;
+        }
+        if (vr.post_process_threshold !== undefined && vr.post_process_threshold !== 0.2) {
+          vrParams.post_process_threshold = vr.post_process_threshold;
+          hasVrParams = true;
+        }
+        
+        if (hasVrParams) {
+          finalOptions.vr_params = vrParams;
+        }
+      }
+      
+      if (sepSettings.demucs_params) {
+        const demucs = sepSettings.demucs_params;
+        const demucsParams: any = {};
+        let hasDemucsParams = false;
+        
+        if (demucs.segment_size !== undefined && demucs.segment_size !== 'Default') {
+          demucsParams.segment_size = demucs.segment_size;
+          hasDemucsParams = true;
+        }
+        if (demucs.shifts !== undefined && demucs.shifts !== 2) {
+          demucsParams.shifts = demucs.shifts;
+          hasDemucsParams = true;
+        }
+        if (demucs.overlap !== undefined && demucs.overlap !== 0.25) {
+          demucsParams.overlap = demucs.overlap;
+          hasDemucsParams = true;
+        }
+        if (demucs.segments_enabled !== undefined && demucs.segments_enabled !== true) {
+          demucsParams.segments_enabled = demucs.segments_enabled;
+          hasDemucsParams = true;
+        }
+        
+        if (hasDemucsParams) {
+          finalOptions.demucs_params = demucsParams;
+        }
+      }
+      
+      if (sepSettings.mdxc_params) {
+        const mdxc = sepSettings.mdxc_params;
+        const mdxcParams: any = {};
+        let hasMdxcParams = false;
+        
+        if (mdxc.segment_size !== undefined && mdxc.segment_size !== 256) {
+          mdxcParams.segment_size = mdxc.segment_size;
+          hasMdxcParams = true;
+        }
+        if (mdxc.override_model_segment_size) {
+          mdxcParams.override_model_segment_size = mdxc.override_model_segment_size;
+          hasMdxcParams = true;
+        }
+        if (mdxc.batch_size !== undefined && mdxc.batch_size !== 1) {
+          mdxcParams.batch_size = mdxc.batch_size;
+          hasMdxcParams = true;
+        }
+        if (mdxc.overlap !== undefined && mdxc.overlap !== 8) {
+          mdxcParams.overlap = mdxc.overlap;
+          hasMdxcParams = true;
+        }
+        if (mdxc.pitch_shift !== undefined && mdxc.pitch_shift !== 0) {
+          mdxcParams.pitch_shift = mdxc.pitch_shift;
+          hasMdxcParams = true;
+        }
+        
+        if (hasMdxcParams) {
+          finalOptions.mdxc_params = mdxcParams;
+        }
+      }
 
       // Convert options object to JSON string
       const optionsString = JSON.stringify(finalOptions);
@@ -451,8 +698,11 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
       // Set up environment with FFmpeg in PATH
       const env = { ...process.env };
       const ffmpegDir = path.dirname(ffmpegPath);
+      // Prepend FFmpeg directory to PATH so it's found first
       env.PATH = `${ffmpegDir}${path.delimiter}${env.PATH || ''}`;
 
+      console.log(`[AudioEngine] FFmpeg path: ${ffmpegPath}`);
+      console.log(`[AudioEngine] FFmpeg directory added to PATH: ${ffmpegDir}`);
       console.log(`[AudioEngine] Spawning with options: ${optionsString}`);
       console.log(`[AudioEngine] Command: ${pythonBin} ${args.join(' ')}`);
 
