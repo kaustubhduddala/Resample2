@@ -47,7 +47,7 @@ jobs:
           pip install "audio-separator${{ matrix.pip_extra }}"
 
       - name: Build with PyInstaller
-        run: pyinstaller src/py-service/build.spec
+        run: pyinstaller src/py-service/audio-engine.spec
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
