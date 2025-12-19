@@ -1,20 +1,14 @@
-NOTE: At this time the project functions fine, besides that the audio stem separation (atleast on my machine, an M2 Macbook Air) is expected to take just over 48 hours for a 1 minute audio sample (no seriously, 5764 segments at an average of 30 seconds per iteration -- you do the math). That to me is not viable at the moment so I'm pausing development until I can figure out what's going on. Feel free to put in a PR if you can figure it out.
-
-
 > [!WARNING]
 > **EARLY DEVELOPMENT**
 >
-> This project is currently in an **early development stage** and is not ready for production use.
-> The codebase is primarily an Electron + React shell with project tooling; core audio‑separation
-> functionality and UI are **not yet implemented** and are subject to major changes.
+> NOTE: At this time the project functions fine, besides that the audio stem separation (atleast on my machine, an M2 Macbook Air) is expected to take just over 48 hours for a 1 minute
+> audio sample (no seriously, 5764 segments at an average of 30 seconds per iteration -- you do the math). That to me is not viable at the moment so I'm pausing development until I can
+> figure out what's going on. Feel free to put in a PR if you can figure it out.
 
 ## Resample2 – Desktop Shell for an AI Audio Separation Tool
 
 Resample2 is intended to become a cross‑platform desktop application for stem separation
 (vocals, drums, bass, instruments, etc.).
-
-**This revision of the app only contains the Electron + Vite + React scaffolding and build
-pipeline – there is no end‑user functionality yet.**
 
 ### Preview
 
@@ -33,20 +27,22 @@ pipeline – there is no end‑user functionality yet.**
 - **React 18** + **TypeScript 5**
 - **Vite 6** for bundling (`vite.main.config.ts`, `vite.preload.config.ts`, `vite.renderer.config.ts`)
 - **Tailwind CSS** and Radix UI primitives
-- **Node.js** runtime with `ytdlp-nodejs` available for future integration
+- **Node.js** runtime with `ytdlp-nodejs`, custom spotifyDL integration
+- **Python3** for audio-separation package (onnxruntime & pytorch)
 
 ## Status and Roadmap
 
 - **Implemented now**
   - Basic Electron Forge configuration and Vite build setup
   - Empty `src/` directory ready for main / preload / renderer source files
-  - Packaging configuration for Windows, macOS, and Linux (ZIP, Squirrel, Deb, RPM)
+  - Packaging configuration for Windows, and macOS
+  - Integrated YouTube/media download and FFmpeg‑based processing
 
 - **Planned (not yet implemented in this version)**
   - Neural‑network‑powered audio stem separation
   - GPU acceleration and model selection (MDX, Demucs, VR, MDXC, etc.)
   - Full UI for file/URL input, stem selection, and export into a DAW
-  - Integrated YouTube/media download and FFmpeg‑based processing
+
 
 ## Getting Started (Development)
 
@@ -58,7 +54,7 @@ pipeline – there is no end‑user functionality yet.**
 ### Install Dependencies
 
 ```bash
-git clone https://github.com/yourusername/Resample2.git
+git clone https://github.com/kaustubhduddala/Resample2.git
 cd Resample2
 
 npm install
@@ -69,7 +65,7 @@ npm install
 This starts Electron Forge with the Vite plugin:
 
 ```bash
-npm run start
+npm start
 ```
 
 ### Run the Vite Dev Server Only (Browser Preview)
@@ -80,7 +76,7 @@ If you just want to develop the React UI in a browser (without Electron):
 npm run dev
 ```
 
-The dev server listens on port `5173` and opens automatically.
+The dev server listens on port `5173` (I think? ymmv) and opens automatically.
 
 ### Build Assets / Package the App
 
@@ -121,12 +117,10 @@ Resample2/
 └── README.md               # This file
 ```
 
-As of this version, no production UI or business logic has been added to `src/`.
-
 ## Contributing / Development Notes
 
-- **Primary goal right now** is to flesh out `src/main.ts`, `src/preload.ts`, and the React
-  renderer (for example, `src/App.tsx`) while keeping the build pipeline working across platforms.
+- **Primary goal right now** is to flesh out and optimize the stem separation so it can ideally
+  be done in minutes, while optimizing for different platforms.
 - Please avoid claiming fully‑functional AI separation features in documentation or marketing
   until they are actually wired into this repository.
 - If/when audio‑separation engines (for example, `audio-separator`, UVR, PyTorch models) are
@@ -161,5 +155,5 @@ Original and upstream work that inspired this project:
 - **zhzhongshi** – Added support for MDXC models in `audio-separator`.
 
 Support channels such as GitHub Issues, Discussions, and a Wiki will be documented once the
-project is closer to a usable alpha.
+project is closer to a usable state.
 
