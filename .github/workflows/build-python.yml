@@ -4,52 +4,41 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build-python:
     strategy:
-      fail-fast: false  # Don't cancel other jobs if one fails (helps debugging)
+      fail-fast: false
       matrix:
         include:
-          # Windows (NVIDIA GPU support usually standard)
+          # Windows x64 (NVIDIA GPU support included)
           - os: windows-latest
-            platform: win32
+            platform: windows
             pip_extra: "[gpu]"
-          
+
           # Mac - Apple Silicon (M1/M2/M3)
-          # 'macos-14' and newer are primarily ARM64
           - os: macos-14
             platform: darwin
-            pip_extra: "[cpu]" 
-            
+            pip_extra: "[cpu]"
+
           # Mac - Intel
-          # Using macos-15 per the error log recommendation for Intel
           - os: macos-15
             platform: darwin
             pip_extra: "[cpu]"
 
-          # Linux
-          - os: ubuntu-latest
-            platform: linux
-            pip_extra: "[gpu]"
-
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4  # Updated to v4 for speed
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5 # Updated to v5
+      - name: Set up Python (x64)
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10' 
+          python-version: "3.10"
+          architecture: "x64" # <-- Explicitly force 64-bit
 
-      - name: Install FFmpeg (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
+      # FFmpeg is needed for Mac (Windows usually gets it via static link or user install)
       - name: Install FFmpeg (Mac)
         if: matrix.platform == 'darwin'
         run: brew install ffmpeg
@@ -62,11 +51,9 @@ jobs:
           pip install "audio-separator${{ matrix.pip_extra }}"
 
       - name: Build with PyInstaller
-        # This points to where your .spec file is. 
-        # Make sure src/py-service/build.spec exists!
+        # Ensure your spec file path matches this!
         run: pyinstaller src/py-service/audio-engine.spec
 
-      # --- THE FIX IS HERE: Updated to v4 ---
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:

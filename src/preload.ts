@@ -76,9 +76,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteFile: (filePath: string) => ipcRenderer.invoke('files:delete', filePath),
   showFileInFolder: (filePath: string) => ipcRenderer.invoke('files:show-in-folder', filePath),
   
-  // Audio separation
-  separateAudio: (filePath: string, outputDir: string, modelName?: string) =>
-    ipcRenderer.invoke('audio:separate', filePath, outputDir, modelName),
+  // Audio separation - accepts options object for JSON pass-through
+  separateAudio: (filePath: string, outputDir: string, options?: any) =>
+    ipcRenderer.invoke('audio:separate', filePath, outputDir, options),
   onAudioSeparationProgress: (callback: (progress: any) => void) => {
     ipcRenderer.on('audio-separation-progress', (_, progress) => callback(progress));
   },
@@ -113,7 +113,7 @@ declare global {
       listDownloadedFiles: (downloadPath: string) => Promise<{ success: boolean; files?: DownloadedFile[]; error?: string }>;
       deleteFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
       showFileInFolder: (filePath: string) => Promise<{ success: boolean; error?: string }>;
-      separateAudio: (filePath: string, outputDir: string, modelName?: string) => Promise<{ status: string; files?: string[]; message?: string; error?: string }>;
+      separateAudio: (filePath: string, outputDir: string, options?: any) => Promise<{ status: string; files?: string[]; message?: string; error?: string }>;
       onAudioSeparationProgress: (callback: (progress: { message: string; isError?: boolean }) => void) => void;
       removeAudioSeparationProgressListener: () => void;
     };

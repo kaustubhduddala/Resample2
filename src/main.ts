@@ -413,8 +413,8 @@ const getPythonBinaryPath = (): string => {
   }
 };
 
-// Audio separation handler
-ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: string, modelName?: string) => {
+// Audio separation handler - now accepts options object for JSON pass-through
+ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: string, options: any = {}) => {
   return new Promise((resolve, reject) => {
     try {
       const pythonBin = getPythonBinaryPath();
@@ -432,26 +432,29 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
         return;
       }
 
-      // Get model directory from settings
+      // Get model directory from settings and merge into options if not already provided
       const settings = loadSettings();
       const modelFileDir = settings.model_directory || path.join(app.getPath('userData'), 'models');
+      
+      // Merge settings into options (user-provided options take precedence)
+      const finalOptions = {
+        model_file_dir: modelFileDir,
+        ...options, // User options override defaults
+      };
 
-      // Build arguments
-      const args = [filePath, outputDir];
-      if (modelName) {
-        args.push(modelName);
-      }
-      if (modelFileDir) {
-        args.push(modelFileDir);
-      }
-      args.push(ffmpegPath);
+      // Convert options object to JSON string
+      const optionsString = JSON.stringify(finalOptions);
+
+      // Build arguments: input_file, output_dir, options_json
+      const args = [filePath, outputDir, optionsString];
 
       // Set up environment with FFmpeg in PATH
       const env = { ...process.env };
       const ffmpegDir = path.dirname(ffmpegPath);
       env.PATH = `${ffmpegDir}${path.delimiter}${env.PATH || ''}`;
 
-      console.log(`Spawning Python process: ${pythonBin} ${args.join(' ')}`);
+      console.log(`[AudioEngine] Spawning with options: ${optionsString}`);
+      console.log(`[AudioEngine] Command: ${pythonBin} ${args.join(' ')}`);
 
       const pythonProcess = spawn(pythonBin, args, { env });
 
