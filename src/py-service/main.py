@@ -3,7 +3,6 @@ import json
 import logging
 import argparse
 from audio_separator.separator import Separator
-from audio_separator.utils.model_utils import get_available_models
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -86,53 +85,77 @@ def process_audio(file_path, output_dir, options_json="{}"):
 def list_models(list_filter=None, list_limit=None, list_format="json"):
     """List available models, optionally filtered and limited."""
     try:
-        models = get_available_models()
+        # Use Separator class to get model list (same as CLI does)
+        separator = Separator(info_only=True)
         
-        # Ensure models is a list
-        if not isinstance(models, list):
-            models = list(models) if models else []
-        
-        # Filter models if requested
-        if list_filter and list_filter.lower() != "all":
-            filter_lower = list_filter.lower()
-            models = [
-                m for m in models
-                if (filter_lower in str(m.get('friendly_name', '')).lower() or
-                    filter_lower in str(m.get('filename', '')).lower() or
-                    filter_lower in str(m.get('output_stems', '')).lower() or
-                    filter_lower in str(m.get('arch', '')).lower())
-            ]
-        
-        # Limit results if requested
-        if list_limit:
-            try:
-                limit = int(list_limit)
-                models = models[:limit]
-            except ValueError:
-                pass
-        
-        # Format output
         if list_format == "json":
+            # Get full model list as JSON
+            model_list = separator.list_supported_model_files()
+            
+            # Convert to list format expected by frontend
+            models = []
+            for filename, info in model_list.items():
+                models.append({
+                    "filename": filename,
+                    "arch": info.get("Type", "Unknown"),
+                    "output_stems": ", ".join(info.get("Stems", [])),
+                    "friendly_name": info.get("Name", filename)
+                })
+            
+            # Filter models if requested
+            if list_filter and list_filter.lower() != "all":
+                filter_lower = list_filter.lower()
+                models = [
+                    m for m in models
+                    if (filter_lower in str(m.get('friendly_name', '')).lower() or
+                        filter_lower in str(m.get('filename', '')).lower() or
+                        filter_lower in str(m.get('output_stems', '')).lower() or
+                        filter_lower in str(m.get('arch', '')).lower())
+                ]
+            
+            # Limit results if requested
+            if list_limit:
+                try:
+                    limit = int(list_limit)
+                    models = models[:limit]
+                except ValueError:
+                    pass
+            
             # Output only JSON - set logging to ERROR level to minimize output
             logging.getLogger().setLevel(logging.ERROR)
             # Print JSON to stdout
             print(json.dumps(models, indent=2))
         else:
-            # Pretty table format (simplified)
-            print("Model Filename".ljust(50) + "Arch".ljust(10) + "Output Stems".ljust(40) + "Friendly Name")
-            print("-" * 120)
-            for model in models:
-                filename = str(model.get('filename', model.get('model_filename', '')))[:48]
-                arch = str(model.get('arch', model.get('architecture', '')))[:8]
-                stems = str(model.get('output_stems', model.get('stems', '')))[:38]
-                friendly = str(model.get('friendly_name', model.get('name', '')))
-                print(f"{filename:<50}{arch:<10}{stems:<40}{friendly}")
+            # Pretty table format using get_simplified_model_list
+            models = separator.get_simplified_model_list(filter_sort_by=list_filter)
+            
+            # Apply limit if specified
+            if list_limit and list_limit > 0:
+                models = dict(list(models.items())[:list_limit])
+            
+            # Calculate maximum widths for each column
+            filename_width = max(len("Model Filename"), max(len(filename) for filename in models.keys()) if models else 0)
+            arch_width = max(len("Arch"), max(len(info["Type"]) for info in models.values()) if models else 0)
+            stems_width = max(len("Output Stems (SDR)"), max(len(", ".join(info["Stems"])) for info in models.values()) if models else 0)
+            name_width = max(len("Friendly Name"), max(len(info["Name"]) for info in models.values()) if models else 0)
+            
+            # Print header
+            print(f"{'Model Filename':<{filename_width}} {'Arch':<{arch_width}} {'Output Stems (SDR)':<{stems_width}} {'Friendly Name':<{name_width}}")
+            print("-" * (filename_width + arch_width + stems_width + name_width + 12))
+            
+            # Print models
+            for filename, info in models.items():
+                arch = info.get("Type", "Unknown")
+                stems = ", ".join(info.get("Stems", []))
+                friendly = info.get("Name", filename)
+                print(f"{filename:<{filename_width}} {arch:<{arch_width}} {stems:<{stems_width}} {friendly:<{name_width}}")
         
         sys.exit(0)
     except Exception as e:
         import traceback
         error_msg = f"Error listing models: {str(e)}\n{traceback.format_exc()}"
-        print(json.dumps({"status": "error", "message": error_msg}))
+        logger.error(error_msg)
+        print(json.dumps({"status": "error", "message": str(e)}))
         sys.exit(1)
 
 def download_model_only(model_filename, model_file_dir):
