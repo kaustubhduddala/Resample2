@@ -2,25 +2,34 @@ name: Build and Release
 
 on:
   workflow_dispatch:
-
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 jobs:
   build-python:
     strategy:
+      fail-fast: false  # Don't cancel other jobs if one fails (helps debugging)
       matrix:
         include:
+          # Windows (NVIDIA GPU support usually standard)
           - os: windows-latest
             platform: win32
-            pip_extra: "[gpu]" # Windows usually targets NVIDIA
-          - os: macos-13 # Intel Mac
+            pip_extra: "[gpu]"
+          
+          # Mac - Apple Silicon (M1/M2/M3)
+          # 'macos-14' and newer are primarily ARM64
+          - os: macos-14
+            platform: darwin
+            pip_extra: "[cpu]" 
+            
+          # Mac - Intel
+          # Using macos-15 per the error log recommendation for Intel
+          - os: macos-15
             platform: darwin
             pip_extra: "[cpu]"
-          - os: macos-14 # Apple Silicon (M1/M2/M3)
-            platform: darwin
-            pip_extra: "[cpu]" # CoreML is enabled via [cpu] on Mac
+
+          # Linux
           - os: ubuntu-latest
             platform: linux
             pip_extra: "[gpu]"
@@ -28,34 +37,40 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4  # Updated to v4 for speed
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # Updated to v5
         with:
-          python-version: "3.10"
+          python-version: '3.10' 
 
-      # FFmpeg handling: For Mac/Linux, usually apt/brew. For Windows, download static.
       - name: Install FFmpeg (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install ffmpeg
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
       - name: Install FFmpeg (Mac)
-        if: runner.os == 'macOS'
+        if: matrix.platform == 'darwin'
         run: brew install ffmpeg
 
-      # Install dependencies based on Platform
       - name: Install Dependencies
         run: |
+          pip install --upgrade pip
           pip install pyinstaller
+          # Install the specific version needed
           pip install "audio-separator${{ matrix.pip_extra }}"
 
       - name: Build with PyInstaller
-        run: pyinstaller py-service/build.spec
+        # This points to where your .spec file is. 
+        # Make sure src/py-service/build.spec exists!
+        run: pyinstaller src/py-service/build.spec
 
-      # Upload the artifacts so the Electron build job can pick them up
+      # --- THE FIX IS HERE: Updated to v4 ---
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: python-binary-${{ matrix.os }}
           path: dist/audio-engine
+          if-no-files-found: error
+          overwrite: true
