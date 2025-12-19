@@ -16,7 +16,9 @@ export interface DownloadedModel {
 
 export function useModelCache() {
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [downloadedModels, setDownloadedModels] = useState<DownloadedModel[]>([]);
+  const [downloadedModels, setDownloadedModels] = useState<DownloadedModel[]>(
+    []
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -25,7 +27,7 @@ export function useModelCache() {
   // Load available models from API
   const loadModels = useCallback(async () => {
     if (!window.electronAPI) return;
-    
+
     setIsLoading(true);
     try {
       const result = await window.electronAPI.listModels();
@@ -35,7 +37,7 @@ export function useModelCache() {
         setLastUpdated(new Date());
       }
     } catch (error) {
-      console.error('Error loading models:', error);
+      console.error("Error loading models:", error);
     } finally {
       setIsLoading(false);
     }
@@ -44,47 +46,59 @@ export function useModelCache() {
   // Load downloaded models from directory
   const loadDownloadedModels = useCallback(async (directory: string) => {
     if (!window.electronAPI || !directory) return;
-    
+
     try {
       const result = await window.electronAPI.listDownloadedModels(directory);
       if (result.success && result.models) {
         setDownloadedModels(result.models);
       }
     } catch (error) {
-      console.error('Error loading downloaded models:', error);
+      console.error("Error loading downloaded models:", error);
     }
   }, []);
 
   // Refresh downloaded models
-  const refreshDownloadedModels = useCallback(async (directory: string) => {
-    await loadDownloadedModels(directory);
-  }, [loadDownloadedModels]);
+  const refreshDownloadedModels = useCallback(
+    async (directory: string) => {
+      await loadDownloadedModels(directory);
+    },
+    [loadDownloadedModels]
+  );
 
   // Download a model
-  const downloadModel = useCallback(async (modelFilename: string, directory: string) => {
-    if (!window.electronAPI) return;
-    
-    try {
-      const result = await window.electronAPI.downloadModel(modelFilename, directory);
-      if (result.success) {
-        // Refresh downloaded models after successful download
-        await loadDownloadedModels(directory);
-        return true;
+  const downloadModel = useCallback(
+    async (modelFilename: string, directory: string) => {
+      if (!window.electronAPI) return;
+
+      try {
+        const result = await window.electronAPI.downloadModel(
+          modelFilename,
+          directory
+        );
+        if (result.success) {
+          // Refresh downloaded models after successful download
+          await loadDownloadedModels(directory);
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error("Error downloading model:", error);
+        return false;
       }
-      return false;
-    } catch (error) {
-      console.error('Error downloading model:', error);
-      return false;
-    }
-  }, [loadDownloadedModels]);
+    },
+    [loadDownloadedModels]
+  );
 
   // Set model directory and load downloaded models
-  const setModelDirectory = useCallback((directory: string) => {
-    setModelDirectoryState(directory);
-    if (directory) {
-      loadDownloadedModels(directory);
-    }
-  }, [loadDownloadedModels]);
+  const setModelDirectory = useCallback(
+    (directory: string) => {
+      setModelDirectoryState(directory);
+      if (directory) {
+        loadDownloadedModels(directory);
+      }
+    },
+    [loadDownloadedModels]
+  );
 
   // Load models on mount
   useEffect(() => {
@@ -105,4 +119,3 @@ export function useModelCache() {
     getDownloadedModelsCount: () => downloadedModels.length,
   };
 }
-
