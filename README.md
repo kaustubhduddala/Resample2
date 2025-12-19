@@ -18,6 +18,9 @@ pipeline – there is no end‑user functionality yet.**
 
 ### Preview
 
+<img width="1105" height="904" alt="image" src="https://github.com/user-attachments/assets/27ba787b-8a0a-45cd-a839-3f6b505e48df" />
+
+
 <img width="1152" height="1006" alt="image" src="https://github.com/user-attachments/assets/4f021b68-c3e6-464d-abc2-ea3a08018e05" />
 
 <img width="1150" height="1007" alt="image" src="https://github.com/user-attachments/assets/62c5b6a2-4dfa-43fa-8d6e-e4c393a93ab0" />
