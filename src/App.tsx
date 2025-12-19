@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { SettingsPage } from "./Settings";
 import icon2 from "./assets/icon2.png";
+import { useModelCache } from "./hooks/use-model-cache";
 
 type InputType = "YouTube" | "Spotify" | "LocalFile" | "Unknown";
 type ProcessingMode = "DownloadOnly" | "DownloadAndExtract" | "ExtractOnly";
@@ -61,7 +62,22 @@ function App() {
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedStems, setSelectedStems] = useState<string[]>([]);
   const [availableStems, setAvailableStems] = useState<string[]>([]);
-  const [simpleModels, setSimpleModels] = useState<any[]>([]);
+  const [selectedLocalFile, setSelectedLocalFile] = useState<string>("");
+  
+  // Use model cache hook
+  const {
+    models: availableModels,
+    downloadedModels,
+    loadDownloadedModels,
+    setModelDirectory,
+  } = useModelCache();
+  
+  // Filter to only show downloaded models - memoize to prevent unnecessary re-renders
+  const simpleModels = useMemo(() => {
+    return availableModels.filter((model) =>
+      downloadedModels.some((downloaded) => downloaded.filename === model.filename)
+    );
+  }, [availableModels, downloadedModels]);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSeparating, setIsSeparating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -90,6 +106,7 @@ function App() {
   >(null);
   const [showSettings, setShowSettings] = useState(false);
   const [stemDropdownOpen, setStemDropdownOpen] = useState(false);
+  const stemDropdownRef = useRef<HTMLDivElement>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [settings, setSettings] = useState({
     download_path: "",
@@ -156,6 +173,10 @@ function App() {
         if (settingsResult.success && settingsResult.settings) {
           setSettings(settingsResult.settings);
           addConsoleMessage("✓ Settings loaded");
+          // Set model directory and load downloaded models
+          if (settingsResult.settings.model_directory) {
+            setModelDirectory(settingsResult.settings.model_directory);
+          }
         } else {
           // Load default paths if settings couldn't be loaded
           const pathsResult = await window.electronAPI.getDefaultPaths();
@@ -165,6 +186,10 @@ function App() {
               download_path: pathsResult.paths!.defaultDownloadPath,
               model_directory: pathsResult.paths!.defaultModelDirectory,
             }));
+            // Set model directory and load downloaded models
+            if (pathsResult.paths!.defaultModelDirectory) {
+              setModelDirectory(pathsResult.paths!.defaultModelDirectory);
+            }
           }
           addConsoleMessage("✓ Using default settings");
         }
@@ -339,9 +364,17 @@ function App() {
       if (isYouTubeUrl(url)) {
         setInputType("YouTube");
         addConsoleMessage(`✓ Detected YouTube URL`);
+        // Reset to DownloadOnly for YouTube/Spotify
+        if (processingMode === "ExtractOnly") {
+          setProcessingMode("DownloadOnly");
+        }
       } else if (url.includes("spotify.com")) {
         setInputType("Spotify");
         addConsoleMessage(`✓ Detected Spotify URL`);
+        // Reset to DownloadOnly for YouTube/Spotify
+        if (processingMode === "ExtractOnly") {
+          setProcessingMode("DownloadOnly");
+        }
       } else if (
         url.includes("file://") ||
         url.startsWith("/") ||
@@ -349,12 +382,76 @@ function App() {
       ) {
         setInputType("LocalFile");
         addConsoleMessage(`✓ Detected Local File`);
+        // Set to ExtractOnly for local files
+        setProcessingMode("ExtractOnly");
+        setSelectedLocalFile(url.replace("file://", ""));
       } else {
         setInputType("Unknown");
         addConsoleMessage(`⚠ Unknown URL type`);
       }
     }
   }, [url, addConsoleMessage]);
+
+  // Update available stems when model is selected (but don't reset selected stems unless model actually changes)
+  const prevSelectedModelRef = useRef<string>("");
+  useEffect(() => {
+    // Only reset stems if the model actually changed, not on every render
+    if (selectedModel !== prevSelectedModelRef.current) {
+      prevSelectedModelRef.current = selectedModel;
+      
+      if (selectedModel) {
+        const model = simpleModels.find((m) => m.filename === selectedModel);
+        if (model && model.output_stems) {
+          // Parse stems from comma-separated string
+          const stems = model.output_stems
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter((s: string) => s.length > 0);
+          setAvailableStems(stems);
+          // Reset selected stems only when model changes
+          setSelectedStems([]);
+        } else {
+          setAvailableStems([]);
+          setSelectedStems([]);
+        }
+      } else {
+        setAvailableStems([]);
+        setSelectedStems([]);
+      }
+    } else if (selectedModel) {
+      // Model hasn't changed, but update available stems if they're missing
+      const model = simpleModels.find((m) => m.filename === selectedModel);
+      if (model && model.output_stems && availableStems.length === 0) {
+        const stems = model.output_stems
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0);
+        setAvailableStems(stems);
+      }
+    }
+    // Only depend on selectedModel, not simpleModels to avoid unnecessary resets
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModel]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        stemDropdownRef.current &&
+        !stemDropdownRef.current.contains(event.target as Node)
+      ) {
+        setStemDropdownOpen(false);
+      }
+    };
+
+    if (stemDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [stemDropdownOpen]);
 
   // Handle loading Spotify track info and finding YouTube URL
   const handleLoadSpotifyInfo = useCallback(
@@ -553,7 +650,9 @@ function App() {
       if (result.success && result.filePaths && result.filePaths.length > 0) {
         const filePath = result.filePaths[0];
         setUrl(filePath);
+        setSelectedLocalFile(filePath);
         setInputType("LocalFile");
+        setProcessingMode("ExtractOnly");
         addConsoleMessage(`✓ Selected file: ${filePath}`);
       }
     } catch (error) {
@@ -620,8 +719,100 @@ function App() {
     }
   };
 
+  // Handle stem separation
+  const handleSeparate = async (audioFilePath: string) => {
+    if (!selectedModel) {
+      addConsoleMessage("✗ Please select a model");
+      return;
+    }
+
+    if (!window.electronAPI) {
+      addConsoleMessage("✗ Electron API not available");
+      return;
+    }
+
+    setIsSeparating(true);
+    setProgressStatus("processing");
+    setProgress(0);
+    addConsoleMessage(`Starting stem separation: ${audioFilePath}`);
+
+    try {
+      const outputDir = `${settings.download_path}/Separated`;
+      
+      // Look up selected model metadata so we can pass architecture info
+      const selectedModelInfo = simpleModels.find(
+        (m) => m.filename === selectedModel
+      );
+
+      // Build separation options
+      const separationOptions: any = {
+        model_filename: selectedModel,
+        model_arch: selectedModelInfo?.arch,
+      };
+
+      // If only one stem is selected, use single_stem parameter
+      if (selectedStems.length === 1) {
+        separationOptions.output_single_stem = selectedStems[0];
+      }
+      // If multiple stems selected, we'll output all stems (audio-separator handles this)
+      // Note: audio-separator doesn't support selecting specific multiple stems,
+      // so if multiple are selected, we output all available stems
+
+      // Set up progress listener for separation
+      const progressListener = (progress: any) => {
+        if (progress.message) {
+          addConsoleMessage(progress.message);
+        }
+      };
+      window.electronAPI.onAudioSeparationProgress(progressListener);
+
+      const result = await window.electronAPI.separateAudio(
+        audioFilePath,
+        outputDir,
+        separationOptions
+      );
+
+      window.electronAPI.removeAudioSeparationProgressListener();
+
+      if (result.status === "success") {
+        setProgress(100);
+        setProgressStatus("completed");
+        addConsoleMessage(`✓ Stem separation completed!`);
+        if (result.files && result.files.length > 0) {
+          addConsoleMessage(`  Output files: ${result.files.join(", ")}`);
+        }
+        // Refresh file history to show the new files
+        loadFileHistory();
+      } else {
+        setProgressStatus("error");
+        addConsoleMessage(`✗ Separation failed: ${result.message || result.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      setProgressStatus("error");
+      addConsoleMessage(`✗ Separation error: ${error}`);
+    } finally {
+      setIsSeparating(false);
+    }
+  };
+
   const handleDownload = async () => {
-    if (!url.trim() || !window.electronAPI) {
+    if (!window.electronAPI) {
+      addConsoleMessage("✗ Electron API not available");
+      return;
+    }
+
+    // Handle ExtractOnly mode (local file)
+    if (processingMode === "ExtractOnly") {
+      if (!selectedLocalFile) {
+        addConsoleMessage("✗ Please select a local file");
+        return;
+      }
+      await handleSeparate(selectedLocalFile);
+      return;
+    }
+
+    // Handle DownloadOnly and DownloadAndExtract modes
+    if (!url.trim()) {
       addConsoleMessage("Please enter a valid URL");
       return;
     }
@@ -687,8 +878,42 @@ function App() {
         setProgress(100);
         setProgressStatus("completed");
         addConsoleMessage(`✓ Download completed!`);
+
+        let downloadedFilePath: string | null = null;
+
         if (result.result) {
-          addConsoleMessage(`  File: ${result.result}`);
+          // The yt-dlp wrapper returns a long log string.
+          // Extract the actual output path from the \"Destination:\" or \"[ExtractAudio] Destination:\" lines.
+          const resultText =
+            typeof result.result === "string"
+              ? result.result
+              : JSON.stringify(result.result);
+
+          // Prefer the final extracted audio destination if present
+          let match =
+            resultText.match(/\[ExtractAudio\] Destination:\s*(.+)$/m) ||
+            resultText.match(/Destination:\s*(.+)$/m);
+
+          if (match && match[1]) {
+            downloadedFilePath = match[1].trim();
+          }
+
+          addConsoleMessage(
+            `  File: ${
+              downloadedFilePath ? downloadedFilePath : String(result.result)
+            }`
+          );
+        }
+
+        // If DownloadAndExtract mode, automatically start separation on the real file path
+        if (processingMode === "DownloadAndExtract") {
+          if (!downloadedFilePath) {
+            addConsoleMessage(
+              "✗ Could not determine downloaded file path for separation."
+            );
+          } else {
+            await handleSeparate(downloadedFilePath);
+          }
         }
         // Refresh file history to show the new file
         loadFileHistory();
@@ -712,11 +937,15 @@ function App() {
   const clearConsole = () => {
     setConsoleMessages(["Console cleared"]);
   };
-  const handleStemToggle = (stem: string) => {
-    setSelectedStems((prev) =>
-      prev.includes(stem) ? prev.filter((s) => s !== stem) : [...prev, stem]
-    );
-  };
+  const handleStemToggle = useCallback((stem: string) => {
+    setSelectedStems((prev) => {
+      const newStems = prev.includes(stem)
+        ? prev.filter((s) => s !== stem)
+        : [...prev, stem];
+      console.log('Toggling stem:', stem, 'New stems:', newStems);
+      return newStems;
+    });
+  }, []);
   const formatTimeToHHMMSS = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -874,8 +1103,16 @@ function App() {
         onSettingsSaved={(newSettings) => {
           setSettings(newSettings);
           addConsoleMessage("✓ Settings saved");
+          // Refresh downloaded models when settings are saved
+          if (newSettings.model_directory) {
+            setModelDirectory(newSettings.model_directory);
+          }
         }}
-        onRefreshDownloadedModels={async () => {}}
+        onRefreshDownloadedModels={async () => {
+          if (settings.model_directory) {
+            await loadDownloadedModels(settings.model_directory);
+          }
+        }}
         initialSettings={settings}
       />
     );
@@ -1214,7 +1451,8 @@ function App() {
                     disabled={
                       !url.trim() ||
                       inputType === "Unknown" ||
-                      (inputType === "Spotify" && !youtubeUrlFromSpotify)
+                      (inputType === "Spotify" && !youtubeUrlFromSpotify) ||
+                      ((processingMode === "DownloadAndExtract" || processingMode === "ExtractOnly") && !selectedModel)
                     }
                   >
                     {isDownloading || isSeparating ? (
@@ -1366,64 +1604,74 @@ function App() {
                   </div>
 
                   {selectedModel && (
-                    <div className="stem-dropdown">
-                      <label className="block text-sm font-medium mb-2">
-                        Available Stems
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">
+                        Extract Stems
                       </label>
-                      <div className="relative">
-                        <div
-                          className="flex items-center justify-between w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 cursor-pointer hover:border-gray-400 dark:hover:border-gray-500"
+                      <div className="relative" ref={stemDropdownRef}>
+                        <button
+                          type="button"
+                          className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                           onClick={() => setStemDropdownOpen(!stemDropdownOpen)}
                         >
-                          <span className="text-sm">
+                          <span className="line-clamp-1">
                             {selectedStems.length === 0
-                              ? "Select stems to extract"
-                              : `${selectedStems.length} stem(s) selected`}
+                              ? "All stems (default)"
+                              : selectedStems.length === 1
+                              ? `Only: ${selectedStems[0]}`
+                              : `${selectedStems.length} stems selected`}
                           </span>
-                          <ChevronDown
-                            className={`h-4 w-4 transition-transform ${stemDropdownOpen ? "rotate-180" : ""}`}
-                          />
-                        </div>
+                          <ChevronDown className="h-4 w-4 opacity-50" />
+                        </button>
 
                         {stemDropdownOpen && (
-                          <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                            <div className="p-2">
+                          <div className="absolute z-50 w-full mt-1 max-h-60 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95">
+                            <div className="p-1 overflow-y-auto max-h-60">
+                              <label
+                                className="flex items-center space-x-2 px-2 py-1.5 rounded-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                              >
+                                <Checkbox 
+                                  checked={selectedStems.length === 0}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedStems([]);
+                                    }
+                                  }}
+                                />
+                                <span className="text-sm font-medium">
+                                  All stems (default)
+                                </span>
+                              </label>
                               {availableStems.map((stem) => (
-                                <div
+                                <label
                                   key={stem}
-                                  className="flex items-center space-x-2 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
-                                  onClick={() => handleStemToggle(stem)}
+                                  className="flex items-center space-x-2 px-2 py-1.5 rounded-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
                                 >
-                                  <Checkbox
+                                  <Checkbox 
                                     checked={selectedStems.includes(stem)}
-                                    className="pointer-events-none"
+                                    onCheckedChange={() => {
+                                      handleStemToggle(stem);
+                                    }}
                                   />
                                   <span className="text-sm capitalize">
                                     {stem}
                                   </span>
-                                </div>
+                                </label>
                               ))}
                               {availableStems.length === 0 && (
-                                <div className="px-2 py-1 text-sm text-gray-500">
-                                  No stems available
+                                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                  No stems available for this model
                                 </div>
                               )}
                             </div>
-                            {selectedStems.length > 0 && (
-                              <div className="border-t border-gray-200 dark:border-gray-700 p-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setSelectedStems([])}
-                                  className="w-full text-xs"
-                                >
-                                  Clear All
-                                </Button>
-                              </div>
-                            )}
                           </div>
                         )}
                       </div>
+                      {availableStems.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Available: {availableStems.join(", ")}. Select stems to extract, or leave as "All stems" to extract all.
+                        </p>
+                      )}
                     </div>
                   )}
                 </CardContent>

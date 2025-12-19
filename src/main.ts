@@ -517,6 +517,15 @@ function buildCliArgs(filePath: string, outputDir: string, options: any, setting
     args.push('--model_filename', options.model_filename);
   }
   
+  // Normalize model architecture for conditional params
+  const modelArch = (options.model_arch || '').toString().toLowerCase();
+  const isMDX =
+    modelArch.includes('mdx') ||
+    modelArch.includes('roformer'); // Roformer models are MDX-based
+  const isVR = modelArch.includes('vr');
+  const isDemucs = modelArch.includes('demucs');
+  const isMDXC = modelArch.includes('mdxc');
+
   // Merge separation settings from settings object
   const sepSettings = settings.separation_settings;
   
@@ -552,86 +561,94 @@ function buildCliArgs(filePath: string, outputDir: string, options: any, setting
     args.push('--custom_output_names', JSON.stringify(options.custom_output_names));
   }
   
-  // MDX Architecture Parameters
-  const mdxParams = options.mdx_params || sepSettings.mdx_params;
-  if (mdxParams) {
-    if (mdxParams.segment_size !== undefined && mdxParams.segment_size !== 256) {
-      args.push('--mdx_segment_size', String(mdxParams.segment_size));
-    }
-    if (mdxParams.overlap !== undefined && mdxParams.overlap !== 0.25) {
-      args.push('--mdx_overlap', String(mdxParams.overlap));
-    }
-    if (mdxParams.batch_size !== undefined && mdxParams.batch_size !== 1) {
-      args.push('--mdx_batch_size', String(mdxParams.batch_size));
-    }
-    if (mdxParams.hop_length !== undefined && mdxParams.hop_length !== 1024) {
-      args.push('--mdx_hop_length', String(mdxParams.hop_length));
-    }
-    if (mdxParams.enable_denoise) {
-      args.push('--mdx_enable_denoise');
-    }
-  }
-  
-  // VR Architecture Parameters
-  const vrParams = options.vr_params || sepSettings.vr_params;
-  if (vrParams) {
-    if (vrParams.batch_size !== undefined && vrParams.batch_size !== 1) {
-      args.push('--vr_batch_size', String(vrParams.batch_size));
-    }
-    if (vrParams.window_size !== undefined && vrParams.window_size !== 512) {
-      args.push('--vr_window_size', String(vrParams.window_size));
-    }
-    if (vrParams.aggression !== undefined && vrParams.aggression !== 5) {
-      args.push('--vr_aggression', String(vrParams.aggression));
-    }
-    if (vrParams.enable_tta) {
-      args.push('--vr_enable_tta');
-    }
-    if (vrParams.high_end_process) {
-      args.push('--vr_high_end_process');
-    }
-    if (vrParams.enable_post_process) {
-      args.push('--vr_enable_post_process');
-    }
-    if (vrParams.post_process_threshold !== undefined && vrParams.post_process_threshold !== 0.2) {
-      args.push('--vr_post_process_threshold', String(vrParams.post_process_threshold));
+  // MDX Architecture Parameters (only if model is MDX/Roformer)
+  if (isMDX) {
+    const mdxParams = options.mdx_params || sepSettings.mdx_params;
+    if (mdxParams) {
+      if (mdxParams.segment_size !== undefined && mdxParams.segment_size !== 256) {
+        args.push('--mdx_segment_size', String(mdxParams.segment_size));
+      }
+      if (mdxParams.overlap !== undefined && mdxParams.overlap !== 0.25) {
+        args.push('--mdx_overlap', String(mdxParams.overlap));
+      }
+      if (mdxParams.batch_size !== undefined && mdxParams.batch_size !== 1) {
+        args.push('--mdx_batch_size', String(mdxParams.batch_size));
+      }
+      if (mdxParams.hop_length !== undefined && mdxParams.hop_length !== 1024) {
+        args.push('--mdx_hop_length', String(mdxParams.hop_length));
+      }
+      if (mdxParams.enable_denoise) {
+        args.push('--mdx_enable_denoise');
+      }
     }
   }
   
-  // Demucs Architecture Parameters
-  const demucsParams = options.demucs_params || sepSettings.demucs_params;
-  if (demucsParams) {
-    if (demucsParams.segment_size !== undefined && demucsParams.segment_size !== 'Default') {
-      args.push('--demucs_segment_size', String(demucsParams.segment_size));
-    }
-    if (demucsParams.shifts !== undefined && demucsParams.shifts !== 2) {
-      args.push('--demucs_shifts', String(demucsParams.shifts));
-    }
-    if (demucsParams.overlap !== undefined && demucsParams.overlap !== 0.25) {
-      args.push('--demucs_overlap', String(demucsParams.overlap));
-    }
-    if (demucsParams.segments_enabled !== undefined && demucsParams.segments_enabled !== true) {
-      args.push('--demucs_segments_enabled', String(demucsParams.segments_enabled));
+  // VR Architecture Parameters (only if model is VR)
+  if (isVR) {
+    const vrParams = options.vr_params || sepSettings.vr_params;
+    if (vrParams) {
+      if (vrParams.batch_size !== undefined && vrParams.batch_size !== 1) {
+        args.push('--vr_batch_size', String(vrParams.batch_size));
+      }
+      if (vrParams.window_size !== undefined && vrParams.window_size !== 512) {
+        args.push('--vr_window_size', String(vrParams.window_size));
+      }
+      if (vrParams.aggression !== undefined && vrParams.aggression !== 5) {
+        args.push('--vr_aggression', String(vrParams.aggression));
+      }
+      if (vrParams.enable_tta) {
+        args.push('--vr_enable_tta');
+      }
+      if (vrParams.high_end_process) {
+        args.push('--vr_high_end_process');
+      }
+      if (vrParams.enable_post_process) {
+        args.push('--vr_enable_post_process');
+      }
+      if (vrParams.post_process_threshold !== undefined && vrParams.post_process_threshold !== 0.2) {
+        args.push('--vr_post_process_threshold', String(vrParams.post_process_threshold));
+      }
     }
   }
   
-  // MDXC Architecture Parameters
-  const mdxcParams = options.mdxc_params || sepSettings.mdxc_params;
-  if (mdxcParams) {
-    if (mdxcParams.segment_size !== undefined && mdxcParams.segment_size !== 256) {
-      args.push('--mdxc_segment_size', String(mdxcParams.segment_size));
+  // Demucs Architecture Parameters (only if model is Demucs)
+  if (isDemucs) {
+    const demucsParams = options.demucs_params || sepSettings.demucs_params;
+    if (demucsParams) {
+      if (demucsParams.segment_size !== undefined && demucsParams.segment_size !== 'Default') {
+        args.push('--demucs_segment_size', String(demucsParams.segment_size));
+      }
+      if (demucsParams.shifts !== undefined && demucsParams.shifts !== 2) {
+        args.push('--demucs_shifts', String(demucsParams.shifts));
+      }
+      if (demucsParams.overlap !== undefined && demucsParams.overlap !== 0.25) {
+        args.push('--demucs_overlap', String(demucsParams.overlap));
+      }
+      if (demucsParams.segments_enabled !== undefined && demucsParams.segments_enabled !== true) {
+        args.push('--demucs_segments_enabled', String(demucsParams.segments_enabled));
+      }
     }
-    if (mdxcParams.override_model_segment_size) {
-      args.push('--mdxc_override_model_segment_size');
-    }
-    if (mdxcParams.batch_size !== undefined && mdxcParams.batch_size !== 1) {
-      args.push('--mdxc_batch_size', String(mdxcParams.batch_size));
-    }
-    if (mdxcParams.overlap !== undefined && mdxcParams.overlap !== 8) {
-      args.push('--mdxc_overlap', String(mdxcParams.overlap));
-    }
-    if (mdxcParams.pitch_shift !== undefined && mdxcParams.pitch_shift !== 0) {
-      args.push('--mdxc_pitch_shift', String(mdxcParams.pitch_shift));
+  }
+  
+  // MDXC Architecture Parameters (only if model is MDXC)
+  if (isMDXC) {
+    const mdxcParams = options.mdxc_params || sepSettings.mdxc_params;
+    if (mdxcParams) {
+      if (mdxcParams.segment_size !== undefined && mdxcParams.segment_size !== 256) {
+        args.push('--mdxc_segment_size', String(mdxcParams.segment_size));
+      }
+      if (mdxcParams.override_model_segment_size) {
+        args.push('--mdxc_override_model_segment_size');
+      }
+      if (mdxcParams.batch_size !== undefined && mdxcParams.batch_size !== 1) {
+        args.push('--mdxc_batch_size', String(mdxcParams.batch_size));
+      }
+      if (mdxcParams.overlap !== undefined && mdxcParams.overlap !== 8) {
+        args.push('--mdxc_overlap', String(mdxcParams.overlap));
+      }
+      if (mdxcParams.pitch_shift !== undefined && mdxcParams.pitch_shift !== 0) {
+        args.push('--mdxc_pitch_shift', String(mdxcParams.pitch_shift));
+      }
     }
   }
   
@@ -684,9 +701,9 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
         // Log progress to console
         console.log(`[Audio Separator] ${output.trim()}`);
         // Send progress updates to renderer
-        const window = BrowserWindow.fromWebContents(event.sender);
-        if (window) {
-          window.webContents.send('audio-separation-progress', { message: output.trim() });
+          const window = BrowserWindow.fromWebContents(event.sender);
+          if (window) {
+            window.webContents.send('audio-separation-progress', { message: output.trim() });
         }
       });
 
