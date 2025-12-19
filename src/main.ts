@@ -8,7 +8,9 @@ import {
   getVideoInfo,
   getThumbnails,
   downloadVideo,
+  getFFmpegPath,
 } from './services/ytdlp-service.js';
+import { spawn } from 'node:child_process';
 import {
   getSpotifyTrackAndYouTubeUrl,
 } from './services/spotify-service.js';
@@ -396,6 +398,121 @@ ipcMain.handle('files:show-in-folder', async (_, filePath: string) => {
   } catch (error) {
     return { success: false, error: String(error) };
   }
+});
+
+// Helper to find the Python binary (handles Dev vs Prod)
+const getPythonBinaryPath = (): string => {
+  const binaryName = process.platform === 'win32' ? 'audio-engine.exe' : 'audio-engine';
+  
+  if (app.isPackaged) {
+    // In production, the binary is usually in resources/
+    return path.join(process.resourcesPath, 'audio-engine', binaryName);
+  } else {
+    // In dev, point to your dist folder
+    return path.join(__dirname, '../../dist/audio-engine', binaryName);
+  }
+};
+
+// Audio separation handler
+ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: string, modelName?: string) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const pythonBin = getPythonBinaryPath();
+      
+      // Check if binary exists
+      if (!fs.existsSync(pythonBin)) {
+        reject(new Error(`Python binary not found at: ${pythonBin}`));
+        return;
+      }
+
+      // Get FFmpeg path
+      const ffmpegPath = getFFmpegPath();
+      if (!ffmpegPath) {
+        reject(new Error('FFmpeg not found. Please ensure FFmpeg is downloaded.'));
+        return;
+      }
+
+      // Get model directory from settings
+      const settings = loadSettings();
+      const modelFileDir = settings.model_directory || path.join(app.getPath('userData'), 'models');
+
+      // Build arguments
+      const args = [filePath, outputDir];
+      if (modelName) {
+        args.push(modelName);
+      }
+      if (modelFileDir) {
+        args.push(modelFileDir);
+      }
+      args.push(ffmpegPath);
+
+      // Set up environment with FFmpeg in PATH
+      const env = { ...process.env };
+      const ffmpegDir = path.dirname(ffmpegPath);
+      env.PATH = `${ffmpegDir}${path.delimiter}${env.PATH || ''}`;
+
+      console.log(`Spawning Python process: ${pythonBin} ${args.join(' ')}`);
+
+      const pythonProcess = spawn(pythonBin, args, { env });
+
+      let stdoutData = '';
+      let stderrData = '';
+
+      pythonProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        stdoutData += output;
+        // Log progress to console
+        console.log(`[Audio Separator] ${output.trim()}`);
+        // Send progress updates to renderer if it's a log message
+        if (!output.trim().startsWith('{')) {
+          const window = BrowserWindow.fromWebContents(event.sender);
+          if (window) {
+            window.webContents.send('audio-separation-progress', { message: output.trim() });
+          }
+        }
+      });
+
+      pythonProcess.stderr.on('data', (data) => {
+        const output = data.toString();
+        stderrData += output;
+        console.error(`[Audio Separator Error] ${output.trim()}`);
+        // Send error messages to renderer
+        const window = BrowserWindow.fromWebContents(event.sender);
+        if (window) {
+          window.webContents.send('audio-separation-progress', { message: output.trim(), isError: true });
+        }
+      });
+
+      pythonProcess.on('close', (code) => {
+        if (code !== 0) {
+          const errorMsg = stderrData || stdoutData || `Process exited with code ${code}`;
+          reject(new Error(errorMsg));
+          return;
+        }
+        
+        try {
+          // Try to parse JSON from stdout
+          const jsonMatch = stdoutData.match(/\{.*\}/s);
+          if (jsonMatch) {
+            const result = JSON.parse(jsonMatch[0]);
+            resolve(result);
+          } else {
+            // If no JSON found, return success with stdout
+            resolve({ status: 'success', message: stdoutData });
+          }
+        } catch (e) {
+          // If parsing fails, return the raw output
+          resolve({ status: 'success', message: stdoutData, raw: true });
+        }
+      });
+
+      pythonProcess.on('error', (error) => {
+        reject(new Error(`Failed to spawn Python process: ${error.message}`));
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
 });
 
 // This method will be called when Electron has finished initialization

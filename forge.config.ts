@@ -11,6 +11,15 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: './src/assets/icon', // Electron will automatically use .ico, .icns, or .png based on platform
+    extraResource: [
+      {
+        from: 'dist/audio-engine',
+        to: 'audio-engine',
+        globOptions: {
+          ignore: ['**/*.spec', '**/*.pyc', '**/__pycache__/**'],
+        },
+      },
+    ],
   },
   rebuildConfig: {},
   makers: [

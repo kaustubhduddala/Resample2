@@ -3,6 +3,12 @@ import { YtDlp, helpers } from 'ytdlp-nodejs';
 // Lazy initialization - will be created after FFmpeg is set up
 let ytdlp: YtDlp | null = null;
 
+// Export function to get FFmpeg path for use in other services
+export function getFFmpegPath(): string | null {
+  const path = helpers.findFFmpegBinary();
+  return path || null;
+}
+
 // Get or create YtDlp instance with proper paths
 export function getYtDlpInstance(): YtDlp {
   if (ytdlp) {
