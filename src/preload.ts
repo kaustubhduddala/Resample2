@@ -114,7 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteFile: (filePath: string) => ipcRenderer.invoke('files:delete', filePath),
   showFileInFolder: (filePath: string) => ipcRenderer.invoke('files:show-in-folder', filePath),
   
-  // Audio separation - accepts options object for JSON pass-through
+  // Audio separation - accepts options object that gets converted to CLI arguments
   separateAudio: (filePath: string, outputDir: string, options?: any) =>
     ipcRenderer.invoke('audio:separate', filePath, outputDir, options),
   onAudioSeparationProgress: (callback: (progress: any) => void) => {

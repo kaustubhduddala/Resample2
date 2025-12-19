@@ -68,7 +68,10 @@ export async function listModels(): Promise<ModelInfo[]> {
       let stderrData = '';
 
       pythonProcess.stdout.on('data', (data) => {
-        stdoutData += data.toString();
+        const output = data.toString();
+        stdoutData += output;
+        // Log for debugging
+        console.log(`[Model Service] Received: ${output.substring(0, 100)}...`);
       });
 
       pythonProcess.stderr.on('data', (data) => {
@@ -82,24 +85,132 @@ export async function listModels(): Promise<ModelInfo[]> {
         }
         
         try {
-          // Extract JSON from output (may have logging mixed in)
-          const jsonMatch = stdoutData.match(/\[(.*)\]|(\{.*\})/s);
+          // Try to parse the entire stdout as JSON first
+          let parsed: any;
           let jsonStr = stdoutData.trim();
           
-          if (jsonMatch) {
-            // Try to find the JSON array or object
-            const match = stdoutData.match(/\[[\s\S]*\]|{[\s\S]*}/);
-            if (match) {
-              jsonStr = match[0];
+          try {
+            // First attempt: parse entire stdout as JSON
+            parsed = JSON.parse(jsonStr);
+            console.log(`[Model Service] Successfully parsed entire stdout as JSON`);
+          } catch (e) {
+            // If that fails, try to extract JSON from mixed output
+            console.log(`[Model Service] Failed to parse entire stdout, attempting extraction...`);
+            
+            // Find the first { that starts a JSON object
+            const jsonStart = jsonStr.indexOf('{');
+            if (jsonStart === -1) {
+              throw new Error('No JSON object found in output');
             }
+            
+            jsonStr = jsonStr.substring(jsonStart);
+            
+            // Find the matching closing brace
+            // This handles nested structures properly
+            let depth = 0;
+            let inString = false;
+            let escapeNext = false;
+            let endIndex = -1;
+            
+            for (let i = 0; i < jsonStr.length; i++) {
+              const char = jsonStr[i];
+              
+              if (escapeNext) {
+                escapeNext = false;
+                continue;
+              }
+              
+              if (char === '\\') {
+                escapeNext = true;
+                continue;
+              }
+              
+              if (char === '"' && !escapeNext) {
+                inString = !inString;
+                continue;
+              }
+              
+              if (!inString) {
+                if (char === '{') {
+                  depth++;
+                } else if (char === '}') {
+                  depth--;
+                  if (depth === 0) {
+                    endIndex = i + 1;
+                    break;
+                  }
+                }
+              }
+            }
+            
+            if (endIndex === -1) {
+              throw new Error('Could not find matching closing brace for JSON object');
+            }
+            
+            jsonStr = jsonStr.substring(0, endIndex);
+            console.log(`[Model Service] Extracted JSON length: ${jsonStr.length}`);
+            console.log(`[Model Service] JSON preview: ${jsonStr.substring(0, 200)}...`);
+            
+            parsed = JSON.parse(jsonStr);
           }
           
-          // Parse JSON output
-          const models = JSON.parse(jsonStr);
+          // Helper function to determine architecture from friendly name or filename
+          const determineArchitecture = (friendlyName: string, filename: string): string => {
+            const lowerFriendly = friendlyName.toLowerCase();
+            const lowerFilename = filename.toLowerCase();
+            
+            // Check friendly name first (more reliable)
+            if (lowerFriendly.includes('roformer')) return 'Roformer';
+            if (lowerFriendly.includes('mdxc')) return 'MDXC';
+            if (lowerFriendly.includes('mdx') && !lowerFriendly.includes('mdxc')) return 'MDX';
+            if (lowerFriendly.includes('vr') || lowerFriendly.includes('vocal remover') || lowerFriendly.includes('vocalremover')) return 'VR';
+            if (lowerFriendly.includes('demucs')) return 'Demucs';
+            
+            // Check filename patterns if friendly name didn't match
+            if (lowerFilename.includes('roformer')) return 'Roformer';
+            if (lowerFilename.includes('mdxc')) return 'MDXC';
+            if (lowerFilename.includes('mdx') && !lowerFilename.includes('mdxc')) return 'MDX';
+            if (lowerFilename.includes('vr_') || lowerFilename.includes('_vr') || lowerFilename.includes('vocal_remover') || lowerFilename.includes('vocalremover')) return 'VR';
+            if (lowerFilename.includes('demucs')) return 'Demucs';
+            if (lowerFilename.endsWith('.onnx')) return 'MDX'; // Most .onnx files are MDX
+            
+            return 'Unknown';
+          };
           
-          // Ensure it's an array
-          if (!Array.isArray(models)) {
-            reject(new Error('Model list is not an array'));
+          // Handle both dictionary (new CLI format) and array (old format) formats
+          let models: any[];
+          if (Array.isArray(parsed)) {
+            // Old format: already an array
+            models = parsed;
+          } else if (typeof parsed === 'object' && parsed !== null) {
+            // New format: nested dictionary structure
+            // Top level: architecture names (VR, MDX, Demucs, MDXC, etc.)
+            // Second level: friendly names as keys, model info as values
+            models = [];
+            
+            for (const [archKey, archModels] of Object.entries(parsed)) {
+              if (typeof archModels === 'object' && archModels !== null) {
+                // Iterate through models within this architecture
+                for (const [friendlyName, info] of Object.entries(archModels)) {
+                  if (typeof info === 'object' && info !== null) {
+                    const modelInfo = info as any;
+                    const filename = modelInfo?.filename || '';
+                    const stems = Array.isArray(modelInfo?.stems) ? modelInfo.stems : [];
+                    // Use the architecture key, or determine from friendly name/filename
+                    const arch = determineArchitecture(friendlyName, filename) || archKey;
+                    
+                    models.push({
+                      filename: filename,
+                      arch: arch,
+                      output_stems: stems.join(', '),
+                      friendly_name: friendlyName,
+                    });
+                  }
+                }
+              }
+            }
+          } else {
+            reject(new Error('Model list format is not recognized'));
             return;
           }
           
@@ -110,6 +221,9 @@ export async function listModels(): Promise<ModelInfo[]> {
             output_stems: model.output_stems || model.stems || '',
             friendly_name: model.friendly_name || model.name || model.filename || '',
           }));
+          
+          console.log(`[Model Service] Parsed ${modelInfos.length} models`);
+          console.log(`[Model Service] Sample models:`, modelInfos.slice(0, 3).map(m => ({ filename: m.filename, arch: m.arch, friendly_name: m.friendly_name })));
           
           resolve(modelInfos);
         } catch (e) {

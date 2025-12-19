@@ -109,44 +109,75 @@ You can find the exact FFmpeg path by:
 
 ## Testing Audio Engine
 
-Once FFmpeg is in your PATH, you can test the audio-engine binary:
+Once FFmpeg is in your PATH, you can test the audio-engine binary. The binary works exactly like the `audio-separator` CLI tool.
 
 ### Basic Test
 
 ```bash
 # macOS/Linux
-./dist/audio-engine/audio-engine "/path/to/input.mp3" "/path/to/output/dir"
+./dist/audio-engine/audio-engine "/path/to/input.mp3"
 
 # Windows
-.\dist\audio-engine\audio-engine.exe "C:\path\to\input.mp3" "C:\path\to\output\dir"
+.\dist\audio-engine\audio-engine.exe "C:\path\to\input.mp3"
 ```
 
-### Advanced Test with JSON Options
+### Advanced Test with CLI Options
 
 ```bash
 # macOS/Linux
 ./dist/audio-engine/audio-engine \
   "/path/to/input.mp3" \
-  "/path/to/output/dir" \
-  '{"output_format": "MP3", "output_bitrate": "320k", "model_filename": "model_bs_roformer_ep_317_sdr_12.9755.ckpt"}'
+  --output_dir "/path/to/output/dir" \
+  --output_format MP3 \
+  --output_bitrate 320k \
+  --model_filename "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
 
 # Windows (PowerShell)
 .\dist\audio-engine\audio-engine.exe `
   "C:\path\to\input.mp3" `
-  "C:\path\to\output\dir" `
-  '{\"output_format\": \"MP3\", \"output_bitrate\": \"320k\", \"model_filename\": \"model_bs_roformer_ep_317_sdr_12.9755.ckpt\"}'
+  --output_dir "C:\path\to\output\dir" `
+  --output_format MP3 `
+  --output_bitrate 320k `
+  --model_filename "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
 ```
 
 ### Testing Model Listing
 
-If your binary supports CLI arguments (you may need to update `main.py`):
-
 ```bash
-# macOS/Linux
+# macOS/Linux - Pretty format
+./dist/audio-engine/audio-engine --list_models
+
+# macOS/Linux - JSON format
 ./dist/audio-engine/audio-engine --list_models --list_format=json
 
 # Windows
 .\dist\audio-engine\audio-engine.exe --list_models --list_format=json
+```
+
+### Testing Model Download
+
+```bash
+# macOS/Linux
+./dist/audio-engine/audio-engine \
+  --download_model_only \
+  --model_filename "UVR_MDX.onnx" \
+  --model_file_dir "/path/to/models"
+
+# Windows
+.\dist\audio-engine\audio-engine.exe `
+  --download_model_only `
+  --model_filename "UVR_MDX.onnx" `
+  --model_file_dir "C:\path\to\models"
+```
+
+### View Help
+
+```bash
+# macOS/Linux
+./dist/audio-engine/audio-engine --help
+
+# Windows
+.\dist\audio-engine\audio-engine.exe --help
 ```
 
 ## Troubleshooting

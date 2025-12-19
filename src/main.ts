@@ -498,7 +498,147 @@ const getPythonBinaryPath = (): string => {
   }
 };
 
-// Audio separation handler - now accepts options object for JSON pass-through
+// Helper function to build CLI arguments from options
+function buildCliArgs(filePath: string, outputDir: string, options: any, settings: any): string[] {
+  const args: string[] = [];
+  
+  // Add positional argument: audio file path
+  args.push(filePath);
+  
+  // Add output directory (always include it)
+  args.push('--output_dir', outputDir);
+  
+  // Model file directory (from settings or options)
+  const modelFileDir = options.model_file_dir || settings.model_directory || path.join(app.getPath('userData'), 'models');
+  args.push('--model_file_dir', modelFileDir);
+  
+  // Model filename (from options or default)
+  if (options.model_filename) {
+    args.push('--model_filename', options.model_filename);
+  }
+  
+  // Merge separation settings from settings object
+  const sepSettings = settings.separation_settings;
+  
+  // Common parameters
+  if (options.output_format || (sepSettings.output_format && sepSettings.output_format !== 'FLAC')) {
+    args.push('--output_format', options.output_format || sepSettings.output_format);
+  }
+  if (options.output_bitrate || sepSettings.output_bitrate) {
+    args.push('--output_bitrate', options.output_bitrate || sepSettings.output_bitrate);
+  }
+  if (options.normalization_threshold !== undefined || (sepSettings.normalization_threshold !== undefined && sepSettings.normalization_threshold !== 0.9)) {
+    args.push('--normalization', String(options.normalization_threshold !== undefined ? options.normalization_threshold : sepSettings.normalization_threshold));
+  }
+  if (options.amplification_threshold !== undefined || (sepSettings.amplification_threshold !== undefined && sepSettings.amplification_threshold !== 0.0)) {
+    args.push('--amplification', String(options.amplification_threshold !== undefined ? options.amplification_threshold : sepSettings.amplification_threshold));
+  }
+  if (options.output_single_stem || sepSettings.output_single_stem) {
+    args.push('--single_stem', options.output_single_stem || sepSettings.output_single_stem);
+  }
+  if (options.sample_rate !== undefined || (sepSettings.sample_rate !== undefined && sepSettings.sample_rate !== 44100)) {
+    args.push('--sample_rate', String(options.sample_rate !== undefined ? options.sample_rate : sepSettings.sample_rate));
+  }
+  if (options.use_soundfile || sepSettings.use_soundfile) {
+    args.push('--use_soundfile');
+  }
+  if (options.use_autocast || sepSettings.use_autocast) {
+    args.push('--use_autocast');
+  }
+  if (options.invert_using_spec || options.invert_spect) {
+    args.push('--invert_spect');
+  }
+  if (options.custom_output_names) {
+    args.push('--custom_output_names', JSON.stringify(options.custom_output_names));
+  }
+  
+  // MDX Architecture Parameters
+  const mdxParams = options.mdx_params || sepSettings.mdx_params;
+  if (mdxParams) {
+    if (mdxParams.segment_size !== undefined && mdxParams.segment_size !== 256) {
+      args.push('--mdx_segment_size', String(mdxParams.segment_size));
+    }
+    if (mdxParams.overlap !== undefined && mdxParams.overlap !== 0.25) {
+      args.push('--mdx_overlap', String(mdxParams.overlap));
+    }
+    if (mdxParams.batch_size !== undefined && mdxParams.batch_size !== 1) {
+      args.push('--mdx_batch_size', String(mdxParams.batch_size));
+    }
+    if (mdxParams.hop_length !== undefined && mdxParams.hop_length !== 1024) {
+      args.push('--mdx_hop_length', String(mdxParams.hop_length));
+    }
+    if (mdxParams.enable_denoise) {
+      args.push('--mdx_enable_denoise');
+    }
+  }
+  
+  // VR Architecture Parameters
+  const vrParams = options.vr_params || sepSettings.vr_params;
+  if (vrParams) {
+    if (vrParams.batch_size !== undefined && vrParams.batch_size !== 1) {
+      args.push('--vr_batch_size', String(vrParams.batch_size));
+    }
+    if (vrParams.window_size !== undefined && vrParams.window_size !== 512) {
+      args.push('--vr_window_size', String(vrParams.window_size));
+    }
+    if (vrParams.aggression !== undefined && vrParams.aggression !== 5) {
+      args.push('--vr_aggression', String(vrParams.aggression));
+    }
+    if (vrParams.enable_tta) {
+      args.push('--vr_enable_tta');
+    }
+    if (vrParams.high_end_process) {
+      args.push('--vr_high_end_process');
+    }
+    if (vrParams.enable_post_process) {
+      args.push('--vr_enable_post_process');
+    }
+    if (vrParams.post_process_threshold !== undefined && vrParams.post_process_threshold !== 0.2) {
+      args.push('--vr_post_process_threshold', String(vrParams.post_process_threshold));
+    }
+  }
+  
+  // Demucs Architecture Parameters
+  const demucsParams = options.demucs_params || sepSettings.demucs_params;
+  if (demucsParams) {
+    if (demucsParams.segment_size !== undefined && demucsParams.segment_size !== 'Default') {
+      args.push('--demucs_segment_size', String(demucsParams.segment_size));
+    }
+    if (demucsParams.shifts !== undefined && demucsParams.shifts !== 2) {
+      args.push('--demucs_shifts', String(demucsParams.shifts));
+    }
+    if (demucsParams.overlap !== undefined && demucsParams.overlap !== 0.25) {
+      args.push('--demucs_overlap', String(demucsParams.overlap));
+    }
+    if (demucsParams.segments_enabled !== undefined && demucsParams.segments_enabled !== true) {
+      args.push('--demucs_segments_enabled', String(demucsParams.segments_enabled));
+    }
+  }
+  
+  // MDXC Architecture Parameters
+  const mdxcParams = options.mdxc_params || sepSettings.mdxc_params;
+  if (mdxcParams) {
+    if (mdxcParams.segment_size !== undefined && mdxcParams.segment_size !== 256) {
+      args.push('--mdxc_segment_size', String(mdxcParams.segment_size));
+    }
+    if (mdxcParams.override_model_segment_size) {
+      args.push('--mdxc_override_model_segment_size');
+    }
+    if (mdxcParams.batch_size !== undefined && mdxcParams.batch_size !== 1) {
+      args.push('--mdxc_batch_size', String(mdxcParams.batch_size));
+    }
+    if (mdxcParams.overlap !== undefined && mdxcParams.overlap !== 8) {
+      args.push('--mdxc_overlap', String(mdxcParams.overlap));
+    }
+    if (mdxcParams.pitch_shift !== undefined && mdxcParams.pitch_shift !== 0) {
+      args.push('--mdxc_pitch_shift', String(mdxcParams.pitch_shift));
+    }
+  }
+  
+  return args;
+}
+
+// Audio separation handler - uses CLI-style arguments
 ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: string, options: any = {}) => {
   return new Promise((resolve, reject) => {
     try {
@@ -517,183 +657,11 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
         return;
       }
 
-      // Get model directory from settings and merge into options if not already provided
+      // Load settings
       const settings = loadSettings();
-      const modelFileDir = settings.model_directory || path.join(app.getPath('userData'), 'models');
       
-      // Build final options, only including non-default values
-      const finalOptions: any = {
-        model_file_dir: modelFileDir,
-      };
-      
-      // Add user-provided options (they override defaults)
-      if (options) {
-        Object.assign(finalOptions, options);
-      }
-      
-      // Merge separation settings, only including non-default values
-      const sepSettings = settings.separation_settings;
-      
-      // Common settings
-      if (sepSettings.output_format && sepSettings.output_format !== 'FLAC') {
-        finalOptions.output_format = sepSettings.output_format;
-      }
-      if (sepSettings.output_bitrate) {
-        finalOptions.output_bitrate = sepSettings.output_bitrate;
-      }
-      if (sepSettings.normalization_threshold !== undefined && sepSettings.normalization_threshold !== 0.9) {
-        finalOptions.normalization_threshold = sepSettings.normalization_threshold;
-      }
-      if (sepSettings.amplification_threshold !== undefined && sepSettings.amplification_threshold !== 0.0) {
-        finalOptions.amplification_threshold = sepSettings.amplification_threshold;
-      }
-      if (sepSettings.output_single_stem) {
-        finalOptions.output_single_stem = sepSettings.output_single_stem;
-      }
-      if (sepSettings.sample_rate !== undefined && sepSettings.sample_rate !== 44100) {
-        finalOptions.sample_rate = sepSettings.sample_rate;
-      }
-      if (sepSettings.use_soundfile) {
-        finalOptions.use_soundfile = sepSettings.use_soundfile;
-      }
-      if (sepSettings.use_autocast) {
-        finalOptions.use_autocast = sepSettings.use_autocast;
-      }
-      
-      // Architecture-specific parameters - only include if they differ from defaults
-      if (sepSettings.mdx_params) {
-        const mdx = sepSettings.mdx_params;
-        const mdxParams: any = {};
-        let hasMdxParams = false;
-        
-        if (mdx.segment_size !== undefined && mdx.segment_size !== 256) {
-          mdxParams.segment_size = mdx.segment_size;
-          hasMdxParams = true;
-        }
-        if (mdx.overlap !== undefined && mdx.overlap !== 0.25) {
-          mdxParams.overlap = mdx.overlap;
-          hasMdxParams = true;
-        }
-        if (mdx.batch_size !== undefined && mdx.batch_size !== 1) {
-          mdxParams.batch_size = mdx.batch_size;
-          hasMdxParams = true;
-        }
-        if (mdx.hop_length !== undefined && mdx.hop_length !== 1024) {
-          mdxParams.hop_length = mdx.hop_length;
-          hasMdxParams = true;
-        }
-        if (mdx.enable_denoise) {
-          mdxParams.enable_denoise = mdx.enable_denoise;
-          hasMdxParams = true;
-        }
-        
-        if (hasMdxParams) {
-          finalOptions.mdx_params = mdxParams;
-        }
-      }
-      
-      if (sepSettings.vr_params) {
-        const vr = sepSettings.vr_params;
-        const vrParams: any = {};
-        let hasVrParams = false;
-        
-        if (vr.batch_size !== undefined && vr.batch_size !== 1) {
-          vrParams.batch_size = vr.batch_size;
-          hasVrParams = true;
-        }
-        if (vr.window_size !== undefined && vr.window_size !== 512) {
-          vrParams.window_size = vr.window_size;
-          hasVrParams = true;
-        }
-        if (vr.aggression !== undefined && vr.aggression !== 5) {
-          vrParams.aggression = vr.aggression;
-          hasVrParams = true;
-        }
-        if (vr.enable_tta) {
-          vrParams.enable_tta = vr.enable_tta;
-          hasVrParams = true;
-        }
-        if (vr.high_end_process) {
-          vrParams.high_end_process = vr.high_end_process;
-          hasVrParams = true;
-        }
-        if (vr.enable_post_process) {
-          vrParams.enable_post_process = vr.enable_post_process;
-          hasVrParams = true;
-        }
-        if (vr.post_process_threshold !== undefined && vr.post_process_threshold !== 0.2) {
-          vrParams.post_process_threshold = vr.post_process_threshold;
-          hasVrParams = true;
-        }
-        
-        if (hasVrParams) {
-          finalOptions.vr_params = vrParams;
-        }
-      }
-      
-      if (sepSettings.demucs_params) {
-        const demucs = sepSettings.demucs_params;
-        const demucsParams: any = {};
-        let hasDemucsParams = false;
-        
-        if (demucs.segment_size !== undefined && demucs.segment_size !== 'Default') {
-          demucsParams.segment_size = demucs.segment_size;
-          hasDemucsParams = true;
-        }
-        if (demucs.shifts !== undefined && demucs.shifts !== 2) {
-          demucsParams.shifts = demucs.shifts;
-          hasDemucsParams = true;
-        }
-        if (demucs.overlap !== undefined && demucs.overlap !== 0.25) {
-          demucsParams.overlap = demucs.overlap;
-          hasDemucsParams = true;
-        }
-        if (demucs.segments_enabled !== undefined && demucs.segments_enabled !== true) {
-          demucsParams.segments_enabled = demucs.segments_enabled;
-          hasDemucsParams = true;
-        }
-        
-        if (hasDemucsParams) {
-          finalOptions.demucs_params = demucsParams;
-        }
-      }
-      
-      if (sepSettings.mdxc_params) {
-        const mdxc = sepSettings.mdxc_params;
-        const mdxcParams: any = {};
-        let hasMdxcParams = false;
-        
-        if (mdxc.segment_size !== undefined && mdxc.segment_size !== 256) {
-          mdxcParams.segment_size = mdxc.segment_size;
-          hasMdxcParams = true;
-        }
-        if (mdxc.override_model_segment_size) {
-          mdxcParams.override_model_segment_size = mdxc.override_model_segment_size;
-          hasMdxcParams = true;
-        }
-        if (mdxc.batch_size !== undefined && mdxc.batch_size !== 1) {
-          mdxcParams.batch_size = mdxc.batch_size;
-          hasMdxcParams = true;
-        }
-        if (mdxc.overlap !== undefined && mdxc.overlap !== 8) {
-          mdxcParams.overlap = mdxc.overlap;
-          hasMdxcParams = true;
-        }
-        if (mdxc.pitch_shift !== undefined && mdxc.pitch_shift !== 0) {
-          mdxcParams.pitch_shift = mdxc.pitch_shift;
-          hasMdxcParams = true;
-        }
-        
-        if (hasMdxcParams) {
-          finalOptions.mdxc_params = mdxcParams;
-        }
-      }
-
-      // Convert options object to JSON string
-      const optionsString = JSON.stringify(finalOptions);
-
-      // Build arguments: input_file, output_dir, options_json
-      const args = [filePath, outputDir, optionsString];
+      // Build CLI arguments
+      const args = buildCliArgs(filePath, outputDir, options, settings);
 
       // Set up environment with FFmpeg in PATH
       const env = { ...process.env };
@@ -703,7 +671,6 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
 
       console.log(`[AudioEngine] FFmpeg path: ${ffmpegPath}`);
       console.log(`[AudioEngine] FFmpeg directory added to PATH: ${ffmpegDir}`);
-      console.log(`[AudioEngine] Spawning with options: ${optionsString}`);
       console.log(`[AudioEngine] Command: ${pythonBin} ${args.join(' ')}`);
 
       const pythonProcess = spawn(pythonBin, args, { env });
@@ -716,12 +683,10 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
         stdoutData += output;
         // Log progress to console
         console.log(`[Audio Separator] ${output.trim()}`);
-        // Send progress updates to renderer if it's a log message
-        if (!output.trim().startsWith('{')) {
-          const window = BrowserWindow.fromWebContents(event.sender);
-          if (window) {
-            window.webContents.send('audio-separation-progress', { message: output.trim() });
-          }
+        // Send progress updates to renderer
+        const window = BrowserWindow.fromWebContents(event.sender);
+        if (window) {
+          window.webContents.send('audio-separation-progress', { message: output.trim() });
         }
       });
 
@@ -743,20 +708,19 @@ ipcMain.handle('audio:separate', async (event, filePath: string, outputDir: stri
           return;
         }
         
-        try {
-          // Try to parse JSON from stdout
-          const jsonMatch = stdoutData.match(/\{.*\}/s);
-          if (jsonMatch) {
-            const result = JSON.parse(jsonMatch[0]);
-            resolve(result);
-          } else {
-            // If no JSON found, return success with stdout
-            resolve({ status: 'success', message: stdoutData });
-          }
-        } catch (e) {
-          // If parsing fails, return the raw output
-          resolve({ status: 'success', message: stdoutData, raw: true });
+        // Success - the CLI outputs log messages, not JSON
+        // Extract output file paths from the log if possible
+        const outputFiles: string[] = [];
+        const outputMatch = stdoutData.match(/Output file\(s\): (.+)/);
+        if (outputMatch) {
+          outputFiles.push(...outputMatch[1].trim().split(/\s+/));
         }
+        
+        resolve({ 
+          status: 'success', 
+          message: stdoutData,
+          files: outputFiles.length > 0 ? outputFiles : undefined
+        });
       });
 
       pythonProcess.on('error', (error) => {
