@@ -2,8 +2,7 @@
 > **EARLY DEVELOPMENT**
 >
 > NOTE: At this time the project functions fine, besides that the audio stem separation (atleast on my machine, an M2 Macbook Air) is expected to take just over 48 hours for a 1 minute
-> audio sample (no seriously, 5764 segments at an average of 30 seconds per iteration -- you do the math). That to me is not viable at the moment so I'm pausing development until I can
-> figure out what's going on. Feel free to put in a PR if you can figure it out.
+> audio sample (no seriously, 5764 segments at an average of 30 seconds per iteration -- you do the math). It's not feasilble for me to continue development at these speeds so I'm pausing development until I can upgrade my machine. Feel free to put in a PR if you can figure it out.
 
 ## Resample2 – AIO Web Audio Downloading and Neural Network Based Stem Separation Application
 
