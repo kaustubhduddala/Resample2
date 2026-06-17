@@ -120,13 +120,6 @@ Resample2/
 
 - **Primary goal right now** is to flesh out and optimize the stem separation so it can ideally
   be done in minutes, while optimizing for different platforms.
-- Please avoid claiming fully‑functional AI separation features in documentation or marketing
-  until they are actually wired into this repository.
-- If/when audio‑separation engines (for example, `audio-separator`, UVR, PyTorch models) are
-  integrated, this README should be expanded again to describe:
-  - Supported models and quality/performance trade‑offs
-  - GPU/CPU support and platform‑specific behavior
-  - CLI tooling, if exposed
 
 ## License
 
@@ -135,7 +128,7 @@ This project is licensed under the **MIT License** – see the [`LICENSE`](LICEN
 ## Acknowledgments (Planned Integrations / Inspirations)
 
 These projects and authors are **not yet fully integrated in this codebase**, but they are the
-primary inspiration and likely upstream dependencies for future work:
+primary inspiration and upstream dependencies for future work:
 
 - **Audio Separator** – Core audio separation engine
 - **yt-dlp** – YouTube and media download capabilities
